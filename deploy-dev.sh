@@ -321,25 +321,55 @@ echo "This may take 15-20 minutes..."
 echo -e "${GREEN}Note: Development environment will auto-shutdown outside business hours${NC}"
 echo -e "${GREEN}Business Hours: $BUSINESS_START - $BUSINESS_END UTC${NC}"
 
-# Build parameters array to ensure proper quoting
-PARAMS=(
-    "ParameterKey=Environment,ParameterValue=${ENVIRONMENT}"
-    "ParameterKey=KeyPairName,ParameterValue=${KEY_PAIR_NAME}"
-    "ParameterKey=WordPressAdminPassword,ParameterValue=${WP_PASSWORD}"
-    "ParameterKey=WordPressAdminEmail,ParameterValue=${WP_EMAIL}"
-    "ParameterKey=WordPressAdminUser,ParameterValue=${WP_USER}"
-    "ParameterKey=InstanceType,ParameterValue=${INSTANCE_TYPE}"
-    "ParameterKey=BusinessHoursStart,ParameterValue=${BUSINESS_START}"
-    "ParameterKey=BusinessHoursEnd,ParameterValue=${BUSINESS_END}"
-)
+# Build parameters using a JSON file to handle special characters properly
+PARAMS_FILE=$(mktemp)
+cat > "$PARAMS_FILE" << EOF
+[
+  {
+    "ParameterKey": "Environment",
+    "ParameterValue": "${ENVIRONMENT}"
+  },
+  {
+    "ParameterKey": "KeyPairName",
+    "ParameterValue": "${KEY_PAIR_NAME}"
+  },
+  {
+    "ParameterKey": "WordPressAdminPassword",
+    "ParameterValue": "${WP_PASSWORD}"
+  },
+  {
+    "ParameterKey": "WordPressAdminEmail",
+    "ParameterValue": "${WP_EMAIL}"
+  },
+  {
+    "ParameterKey": "WordPressAdminUser",
+    "ParameterValue": "${WP_USER}"
+  },
+  {
+    "ParameterKey": "InstanceType",
+    "ParameterValue": "${INSTANCE_TYPE}"
+  },
+  {
+    "ParameterKey": "BusinessHoursStart",
+    "ParameterValue": "${BUSINESS_START}"
+  },
+  {
+    "ParameterKey": "BusinessHoursEnd",
+    "ParameterValue": "${BUSINESS_END}"
+  }
+]
+EOF
 
 aws cloudformation ${OPERATION}-stack \
     --stack-name "$STACK_NAME" \
     --template-body file://"$TEMPLATE_FILE" \
-    --parameters "${PARAMS[@]}" \
+    --parameters file://"$PARAMS_FILE" \
     --capabilities CAPABILITY_NAMED_IAM \
     --region "$REGION" \
     --tags Key=Project,Value=WordPress Key=Environment,Value=Development
+
+# Clean up temporary parameters file
+rm -f "$PARAMS_FILE"
 
 echo ""
 echo -e "${YELLOW}Waiting for stack ${OPERATION} to complete...${NC}"

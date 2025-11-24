@@ -505,9 +505,14 @@ Resources:
                   # Find the line with "/* That's all, stop editing!" or add before it
                   if grep -q "That's all, stop editing" wp-config.php; then
                     # Insert before the "That's all" comment
-                    sed -i "/That's all, stop editing/i\\
-define('WP_HOME', '$WP_URL');\\
-define('WP_SITEURL', '$WP_URL');" wp-config.php
+                    # Create temporary file with the defines using echo to avoid YAML heredoc issues
+                    echo "define('WP_HOME', 'WP_URL_PLACEHOLDER');" > /tmp/wp-url-config.txt
+                    echo "define('WP_SITEURL', 'WP_URL_PLACEHOLDER');" >> /tmp/wp-url-config.txt
+                    # Replace placeholder with actual URL
+                    sed -i "s|WP_URL_PLACEHOLDER|$WP_URL|g" /tmp/wp-url-config.txt
+                    # Insert before "That's all" comment
+                    sed -i "/That's all, stop editing/r /tmp/wp-url-config.txt" wp-config.php
+                    rm -f /tmp/wp-url-config.txt
                   else
                     # Add at the end of the file before closing PHP tag
                     echo "" >> wp-config.php
