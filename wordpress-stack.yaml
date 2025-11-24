@@ -460,7 +460,12 @@ Resources:
                 --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
                 --output text 2>/dev/null || echo "")
               
-              echo "Stack name from tags: ${STACK_NAME_TAG:-NOT_FOUND}"
+              # Use if-else to avoid CloudFormation !Sub variable parsing issues
+              if [ -z "$STACK_NAME_TAG" ] || [ "$STACK_NAME_TAG" == "None" ]; then
+                echo "Stack name from tags: NOT_FOUND"
+              else
+                echo "Stack name from tags: $STACK_NAME_TAG"
+              fi
               
               LB_DNS=""
               # Wait for Load Balancer to be available (retry up to 30 times = 5 minutes)
@@ -562,7 +567,11 @@ Resources:
               chmod 644 wp-config.php
               
               echo "WordPress configuration file created successfully"
-              echo "wp-config.php exists: $([ -f wp-config.php ] && echo 'YES' || echo 'NO')"
+              if [ -f wp-config.php ]; then
+                echo "wp-config.php exists: YES"
+              else
+                echo "wp-config.php exists: NO"
+              fi
             else
               echo "ERROR: wp-config-sample.php not found!"
               echo "Files in current directory:"
