@@ -1,0 +1,724 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WordPress instance with Auto Scaling. Supports Production (24/7) and Development (auto-shutdown) environments'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: Development
+    Description: Environment type - Production runs 24/7, Development auto-shuts down outside business hours
+    AllowedValues:
+      - Production
+      - Development
+  
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    Description: EC2 instance type for WordPress
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+      - t3.large
+  
+  KeyPairName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: Name of an existing EC2 KeyPair to enable SSH access
+  
+  WordPressAdminUser:
+    Type: String
+    Default: admin
+    Description: WordPress admin username
+    NoEcho: false
+  
+  WordPressAdminPassword:
+    Type: String
+    NoEcho: true
+    Description: WordPress admin password
+    MinLength: 8
+  
+  WordPressAdminEmail:
+    Type: String
+    Description: WordPress admin email address
+    Default: admin@example.com
+  
+  BusinessHoursStart:
+    Type: String
+    Default: '09:00'
+    Description: Business hours start time (HH:MM in UTC) - Only used for Development environment
+  
+  BusinessHoursEnd:
+    Type: String
+    Default: '18:00'
+    Description: Business hours end time (HH:MM in UTC) - Only used for Development environment
+
+Conditions:
+  IsDevelopment: !Equals [!Ref Environment, 'Development']
+  IsProduction: !Equals [!Ref Environment, 'Production']
+
+Resources:
+  # VPC and Networking
+  WordPressVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-WordPressVPC'
+        - Key: Environment
+          Value: !Ref Environment
+
+  WordPressPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WordPressVPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 10.0.1.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: WordPressPublicSubnet1
+
+  WordPressPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref WordPressVPC
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: 10.0.2.0/24
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: WordPressPublicSubnet2
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: WordPressInternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref WordPressVPC
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref WordPressVPC
+      Tags:
+        - Key: Name
+          Value: WordPressPublicRouteTable
+
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref WordPressPublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref WordPressPublicSubnet2
+
+  # Security Groups
+  WordPressSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: WordPressSecurityGroup
+      GroupDescription: Security group for WordPress instances
+      VpcId: !Ref WordPressVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: WordPressSecurityGroup
+
+  # IAM Role for EC2 instances
+  WordPressInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: EC2DescribeInstances
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:StopInstances
+                  - ec2:StartInstances
+                Resource: '*'
+        - PolicyName: RDSDescribeInstances
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                Resource: '*'
+
+  WordPressInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref WordPressInstanceRole
+
+  # Launch Template for Auto Scaling
+  WordPressLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
+      LaunchTemplateData:
+        ImageId: ami-0979de60fed46582f  # Amazon Linux 2 AMI (update with your region's AMI)
+        InstanceType: !Ref InstanceType
+        KeyName: !Ref KeyPairName
+        IamInstanceProfile:
+          Arn: !GetAtt WordPressInstanceProfile.Arn
+        SecurityGroupIds:
+          - !Ref WordPressSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            # Redirect all output to log file for debugging
+            exec > >(tee -a /var/log/wordpress-install.log)
+            exec 2>&1
+            
+            echo "=========================================="
+            echo "WordPress Installation Script Started"
+            echo "Timestamp: $(date)"
+            echo "=========================================="
+            
+            # Don't exit on error - log and continue
+            set +e
+            
+            yum update -y
+            
+            # Install PHP 8.0+ (required for WordPress 6.8.0+)
+            # Try Amazon Linux Extras first, then fall back to Remi repository
+            if amazon-linux-extras list | grep -q php8.2; then
+              echo "Installing PHP 8.2 via Amazon Linux Extras..."
+              amazon-linux-extras install php8.2 -y
+              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+            elif amazon-linux-extras list | grep -q php8.1; then
+              echo "Installing PHP 8.1 via Amazon Linux Extras..."
+              amazon-linux-extras install php8.1 -y
+              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+            elif amazon-linux-extras list | grep -q php8.0; then
+              echo "Installing PHP 8.0 via Amazon Linux Extras..."
+              amazon-linux-extras install php8.0 -y
+              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+            else
+              echo "Installing PHP 8.0+ from Remi repository..."
+              yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+              yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
+              yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80
+              yum install -y httpd php php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+            fi
+            
+            systemctl start httpd
+            systemctl enable httpd
+            
+            # Verify PHP version (must be 8.0 or higher)
+            echo "Checking PHP version..."
+            PHP_VERSION=$(php -r "echo PHP_VERSION;" | cut -d. -f1,2)
+            PHP_FULL_VERSION=$(php -v | head -1)
+            echo "Installed PHP version: $PHP_FULL_VERSION"
+            echo "PHP major.minor: $PHP_VERSION"
+            
+            # Check PHP version without bc (bc might not be installed)
+            PHP_MAJOR=$(echo $PHP_VERSION | cut -d. -f1)
+            PHP_MINOR=$(echo $PHP_VERSION | cut -d. -f2)
+            if [ "$PHP_MAJOR" -lt 8 ]; then
+              echo "ERROR: PHP 8.0+ required, but found PHP $PHP_VERSION"
+              echo "WordPress 6.8.0+ requires PHP 8.0 or higher"
+            else
+              echo "PHP version check passed: $PHP_VERSION"
+            fi
+            
+            # Download and extract WordPress
+            echo "Downloading WordPress..."
+            cd /var/www/html
+            wget -q https://wordpress.org/latest.tar.gz
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to download WordPress"
+              exit 1
+            fi
+            
+            echo "Extracting WordPress..."
+            tar -xzf latest.tar.gz
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to extract WordPress"
+              exit 1
+            fi
+            
+            echo "Moving WordPress files..."
+            mv wordpress/* .
+            rm -rf wordpress latest.tar.gz
+            echo "WordPress files extracted successfully"
+            
+            # Wait for database to be ready
+            # Get database endpoint using AWS CLI (avoids CloudFormation !GetAtt substitution issues)
+            echo "Getting database endpoint from AWS RDS..."
+            REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+            DB_HOST=$(aws rds describe-db-instances --db-instance-identifier wordpress-db --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>/dev/null || echo "")
+            
+            # Retry getting DB endpoint (database might still be creating)
+            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
+              echo "Waiting for database endpoint to be available..."
+              for i in {1..12}; do
+                sleep 10
+                DB_HOST=$(aws rds describe-db-instances --db-instance-identifier wordpress-db --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>/dev/null || echo "")
+                if [ -n "$DB_HOST" ] && [ "$DB_HOST" != "None" ]; then
+                  echo "Database endpoint found: $DB_HOST"
+                  break
+                fi
+                echo "Attempt $i/12: Database endpoint not yet available..."
+              done
+            fi
+            
+            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
+              echo "ERROR: Could not retrieve database endpoint"
+              echo "Database may still be initializing. The script will continue but database connection may fail."
+            else
+              echo "Database endpoint: $DB_HOST"
+            fi
+            
+            DB_NAME="wordpress"
+            DB_USER="wordpress"
+            DB_PASS="${WordPressAdminPassword}"
+            
+            # Wait for database to be available (max 5 minutes)
+            echo "Waiting for database to be ready..."
+            echo "Database host: $DB_HOST"
+            echo "Database name: $DB_NAME"
+            echo "Database user: $DB_USER"
+            
+            DB_READY=0
+            for i in {1..60}; do
+              if mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "SELECT 1" 2>/dev/null; then
+                echo "Database is ready!"
+                DB_READY=1
+                break
+              fi
+              echo "Waiting for database... ($i/60)"
+              sleep 5
+            done
+            
+            if [ $DB_READY -eq 0 ]; then
+              echo "ERROR: Database not ready after 5 minutes"
+              echo "Attempting to continue anyway..."
+            fi
+            
+            # Configure WordPress
+            echo "Configuring WordPress..."
+            echo "Current directory: $(pwd)"
+            echo "Files in /var/www/html:"
+            ls -la /var/www/html/ | head -20
+            
+            if [ -f wp-config-sample.php ]; then
+              echo "Found wp-config-sample.php, creating wp-config.php..."
+              cp wp-config-sample.php wp-config.php
+              
+              echo "Updating database configuration..."
+              # Use # as delimiter for sed to avoid conflicts with special characters
+              # For sed replacement strings, we need to escape: & (whole match) and \ (backslash)
+              # Escape backslashes first, then ampersands
+              DB_PASS_ESCAPED=$(printf '%s\n' "$DB_PASS" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g')
+              sed -i "s#database_name_here#$DB_NAME#g" wp-config.php
+              sed -i "s#username_here#$DB_USER#g" wp-config.php
+              sed -i "s#password_here#$DB_PASS_ESCAPED#g" wp-config.php
+              sed -i "s#localhost#$DB_HOST#g" wp-config.php
+              
+              echo "Setting file permissions..."
+              chown -R apache:apache /var/www/html
+              chmod -R 755 /var/www/html
+              chmod 644 wp-config.php
+              
+              echo "WordPress configuration file created successfully"
+              echo "wp-config.php exists: $([ -f wp-config.php ] && echo 'YES' || echo 'NO')"
+            else
+              echo "ERROR: wp-config-sample.php not found!"
+              echo "Files in current directory:"
+              ls -la
+              exit 1
+            fi
+            
+            # Install WP-CLI for automated WordPress installation
+            echo "Installing WP-CLI..."
+            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+            chmod +x wp-cli.phar
+            mv wp-cli.phar /usr/local/bin/wp
+            
+            # Complete WordPress installation using WP-CLI
+            echo "Completing WordPress installation..."
+            WP_ADMIN_USER="${WordPressAdminUser}"
+            WP_ADMIN_PASS="${WordPressAdminPassword}"
+            WP_ADMIN_EMAIL="${WordPressAdminEmail}"
+            WP_SITE_TITLE="WordPress Site"
+            
+            # Wait a bit more for database to be fully ready
+            sleep 10
+            
+            # Run WordPress installation
+            cd /var/www/html
+            sudo -u apache /usr/local/bin/wp core install \
+              --path=/var/www/html \
+              --url="http://localhost" \
+              --title="$WP_SITE_TITLE" \
+              --admin_user="$WP_ADMIN_USER" \
+              --admin_password="$WP_ADMIN_PASS" \
+              --admin_email="$WP_ADMIN_EMAIL" \
+              --skip-email \
+              --allow-root 2>&1 | tee -a /var/log/wordpress-install.log || {
+              echo "WP-CLI installation failed, checking database connection..." | tee -a /var/log/wordpress-install.log
+              mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "USE $DB_NAME; SHOW TABLES;" 2>&1 | tee -a /var/log/wordpress-install.log
+              echo "Attempting manual installation..." | tee -a /var/log/wordpress-install.log
+            }
+            
+            # Set proper permissions after WP-CLI operations
+            chown -R apache:apache /var/www/html
+            chmod -R 755 /var/www/html
+            chmod 644 wp-config.php
+            
+            # Restart httpd
+            systemctl restart httpd
+            systemctl enable httpd
+            
+            # Log completion
+            echo "=========================================="
+            echo "WordPress installation script completed at $(date)"
+            echo "Admin user: $WP_ADMIN_USER"
+            echo "Admin email: $WP_ADMIN_EMAIL"
+            echo "=========================================="
+            
+            # Verify wp-config.php exists
+            if [ -f /var/www/html/wp-config.php ]; then
+              echo "SUCCESS: wp-config.php created"
+            else
+              echo "WARNING: wp-config.php not found after installation"
+            fi
+            
+            # Restart httpd one more time
+            systemctl restart httpd
+            echo "HTTPD restarted"
+
+  # RDS Database for WordPress
+  WordPressDBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for WordPress database
+      SubnetIds:
+        - !Ref WordPressPublicSubnet1
+        - !Ref WordPressPublicSubnet2
+      Tags:
+        - Key: Name
+          Value: WordPressDBSubnetGroup
+
+  WordPressDBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for WordPress RDS database
+      VpcId: !Ref WordPressVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref WordPressSecurityGroup
+          Description: MySQL access from WordPress instances
+      Tags:
+        - Key: Name
+          Value: WordPressDBSecurityGroup
+
+  WordPressDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: wordpress-db
+      Engine: mysql
+      EngineVersion: '8.0'
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp2
+      MasterUsername: wordpress
+      MasterUserPassword: !Ref WordPressAdminPassword
+      DBName: wordpress
+      DBSubnetGroupName: !Ref WordPressDBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref WordPressDBSecurityGroup
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 7
+      Tags:
+        - Key: Name
+          Value: WordPressDatabase
+
+  # Auto Scaling Group
+  WordPressAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub '${Environment}-WordPressAutoScalingGroup'
+      VPCZoneIdentifier:
+        - !Ref WordPressPublicSubnet1
+        - !Ref WordPressPublicSubnet2
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WordPressLaunchTemplate
+        Version: !GetAtt WordPressLaunchTemplate.LatestVersionNumber
+      TargetGroupARNs:
+        - !Ref WordPressTargetGroup
+      MinSize: 1
+      MaxSize: 3
+      DesiredCapacity: 1
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: 300
+      Tags:
+        - Key: Name
+          Value: !Sub '${Environment}-WordPressInstance'
+          PropagateAtLaunch: true
+        - Key: Environment
+          Value: !Ref Environment
+          PropagateAtLaunch: true
+
+  # Application Load Balancer (optional but recommended)
+  WordPressLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${Environment}-WP-LB'
+      Type: application
+      Subnets:
+        - !Ref WordPressPublicSubnet1
+        - !Ref WordPressPublicSubnet2
+      SecurityGroups:
+        - !Ref WordPressSecurityGroup
+      Scheme: internet-facing
+      Tags:
+        - Key: Name
+          Value: WordPressLoadBalancer
+
+  WordPressTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: WordPressTargetGroup
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref WordPressVPC
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  WordPressLoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WordPressTargetGroup
+      LoadBalancerArn: !Ref WordPressLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  # Lambda Function for Auto Shutdown (Development only)
+  WordPressShutdownFunction:
+    Type: AWS::Lambda::Function
+    Condition: IsDevelopment
+    Properties:
+      FunctionName: !Sub '${Environment}-WordPressAutoShutdown'
+      Runtime: python3.9
+      Handler: index.lambda_handler
+      Role: !GetAtt WordPressShutdownLambdaRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          ASG_NAME: !Ref WordPressAutoScalingGroup
+          BUSINESS_HOURS_START: !Ref BusinessHoursStart
+          BUSINESS_HOURS_END: !Ref BusinessHoursEnd
+      Code:
+        ZipFile: |
+          import boto3
+          import os
+          from datetime import datetime, timezone
+          
+          def lambda_handler(event, context):
+              asg_name = os.environ['ASG_NAME']
+              business_start = os.environ['BUSINESS_HOURS_START']
+              business_end = os.environ['BUSINESS_HOURS_END']
+              
+              autoscaling = boto3.client('autoscaling')
+              ec2 = boto3.client('ec2')
+              
+              # Get current UTC time
+              now = datetime.now(timezone.utc)
+              current_time = now.strftime('%H:%M')
+              
+              # Parse business hours
+              start_hour, start_min = map(int, business_start.split(':'))
+              end_hour, end_min = map(int, business_end.split(':'))
+              
+              current_hour = now.hour
+              current_min = now.minute
+              
+              # Check if current time is outside business hours
+              is_business_hours = False
+              if start_hour < end_hour:
+                  # Normal case: 9 AM to 6 PM
+                  is_business_hours = (current_hour > start_hour or 
+                                      (current_hour == start_hour and current_min >= start_min)) and \
+                                     (current_hour < end_hour or 
+                                      (current_hour == end_hour and current_min < end_min))
+              else:
+                  # Overnight case (shouldn't happen for 9-6, but handle it)
+                  is_business_hours = (current_hour >= start_hour or current_hour < end_hour)
+              
+              # Get instances in the Auto Scaling Group
+              response = autoscaling.describe_auto_scaling_groups(
+                  AutoScalingGroupNames=[asg_name]
+              )
+              
+              if not response['AutoScalingGroups']:
+                  return {'statusCode': 200, 'body': 'No Auto Scaling Group found'}
+              
+              asg = response['AutoScalingGroups'][0]
+              instance_ids = [instance['InstanceId'] for instance in asg['Instances']]
+              
+              if not instance_ids:
+                  return {'statusCode': 200, 'body': 'No instances in Auto Scaling Group'}
+              
+              # Get instance states
+              ec2_response = ec2.describe_instances(InstanceIds=instance_ids)
+              
+              for reservation in ec2_response['Reservations']:
+                  for instance in reservation['Instances']:
+                      instance_id = instance['InstanceId']
+                      state = instance['State']['Name']
+                      
+                      if not is_business_hours and state == 'running':
+                          # Outside business hours - stop the instance
+                          print(f'Stopping instance {instance_id} (outside business hours)')
+                          ec2.stop_instances(InstanceIds=[instance_id])
+                      elif is_business_hours and state == 'stopped':
+                          # During business hours - start the instance
+                          print(f'Starting instance {instance_id} (business hours)')
+                          ec2.start_instances(InstanceIds=[instance_id])
+              
+              return {
+                  'statusCode': 200,
+                  'body': f'Processed {len(instance_ids)} instances. Business hours: {is_business_hours}'
+              }
+
+  WordPressShutdownLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: IsDevelopment
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EC2AndAutoScalingAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                  - autoscaling:DescribeAutoScalingGroups
+                  - autoscaling:DescribeAutoScalingInstances
+                Resource: '*'
+
+  # EventBridge Rule to trigger Lambda every hour (Development only)
+  WordPressShutdownSchedule:
+    Type: AWS::Events::Rule
+    Condition: IsDevelopment
+    Properties:
+      Name: !Sub '${Environment}-WordPressAutoShutdownSchedule'
+      Description: Trigger Lambda function to check and shutdown WordPress instances outside business hours
+      ScheduleExpression: rate(1 hour)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt WordPressShutdownFunction.Arn
+          Id: WordPressShutdownTarget
+
+  WordPressShutdownLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsDevelopment
+    Properties:
+      FunctionName: !Ref WordPressShutdownFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt WordPressShutdownSchedule.Arn
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref WordPressVPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'
+
+  LoadBalancerDNS:
+    Description: DNS name of the load balancer
+    Value: !GetAtt WordPressLoadBalancer.DNSName
+    Export:
+      Name: !Sub '${AWS::StackName}-LoadBalancerDNS'
+
+  WordPressURL:
+    Description: WordPress site URL
+    Value: !Sub 'http://${WordPressLoadBalancer.DNSName}'
+
+  DatabaseEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt WordPressDatabase.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-DatabaseEndpoint'
+
+  AutoScalingGroupName:
+    Description: Auto Scaling Group Name
+    Value: !Ref WordPressAutoScalingGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-AutoScalingGroupName'
+
