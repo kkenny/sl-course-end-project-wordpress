@@ -196,6 +196,16 @@ Resources:
                 Action:
                   - rds:DescribeDBInstances
                 Resource: '*'
+        - PolicyName: CloudFormationAndELBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackResources
+                  - elbv2:DescribeLoadBalancers
+                Resource: '*'
 
   WordPressInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -439,59 +449,76 @@ Resources:
               
               # Get stack name from instance tags
               INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+              echo "Instance ID: $INSTANCE_ID"
+              
+              # Wait a bit for tags to be available
+              sleep 5
+              
               STACK_NAME_TAG=$(aws ec2 describe-instances \
                 --instance-ids "$INSTANCE_ID" \
                 --region $REGION \
                 --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
                 --output text 2>/dev/null || echo "")
               
+              echo "Stack name from tags: ${STACK_NAME_TAG:-NOT_FOUND}"
+              
               LB_DNS=""
-              # Try to get Load Balancer DNS from CloudFormation stack outputs
-              if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
-                echo "Found stack name from instance tags: $STACK_NAME_TAG"
-                LB_DNS=$(aws cloudformation describe-stacks \
-                  --stack-name "$STACK_NAME_TAG" \
-                  --region $REGION \
-                  --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
-                  --output text 2>/dev/null || echo "")
-              fi
-              
-              # If we couldn't get it from stack outputs, try querying ELB directly by name pattern
-              if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
-                echo "Trying to get Load Balancer DNS from ELB service..."
-                # Query for Load Balancers with WP-LB in the name (matches our naming: ${Environment}-WP-LB)
-                LB_ARN=$(aws elbv2 describe-load-balancers \
-                  --region $REGION \
-                  --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].LoadBalancerArn' \
-                  --output text 2>/dev/null | head -1 || echo "")
-                
-                if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "null" ]; then
-                  LB_DNS=$(aws elbv2 describe-load-balancers \
-                    --load-balancer-arns "$LB_ARN" \
+              # Wait for Load Balancer to be available (retry up to 30 times = 5 minutes)
+              echo "Waiting for Load Balancer DNS to be available..."
+              for i in {1..30}; do
+                # Try to get Load Balancer DNS from CloudFormation stack outputs
+                if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ] && [ "$STACK_NAME_TAG" != "NOT_FOUND" ]; then
+                  LB_DNS=$(aws cloudformation describe-stacks \
+                    --stack-name "$STACK_NAME_TAG" \
                     --region $REGION \
-                    --query 'LoadBalancers[0].DNSName' \
+                    --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
                     --output text 2>/dev/null || echo "")
-                fi
-              fi
-              
-              # Wait for Load Balancer to be available (retry up to 10 times)
-              if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
-                echo "Waiting for Load Balancer DNS to be available..."
-                for i in {1..10}; do
-                  sleep 10
-                  if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
-                    LB_DNS=$(aws cloudformation describe-stacks \
-                      --stack-name "$STACK_NAME_TAG" \
-                      --region $REGION \
-                      --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
-                      --output text 2>/dev/null || echo "")
-                  fi
+                  
                   if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
-                    echo "Load Balancer DNS found: $LB_DNS"
+                    echo "Load Balancer DNS found from stack outputs: $LB_DNS"
                     break
                   fi
-                  echo "Attempt $i/10: Load Balancer DNS not yet available..."
-                done
+                fi
+                
+                # If we couldn't get it from stack outputs, try querying ELB directly by name pattern
+                if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
+                  # Query for Load Balancers with WP-LB in the name (matches our naming: ${Environment}-WP-LB)
+                  LB_ARN=$(aws elbv2 describe-load-balancers \
+                    --region $REGION \
+                    --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].LoadBalancerArn' \
+                    --output text 2>/dev/null | head -1 || echo "")
+                  
+                  if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "null" ]; then
+                    LB_DNS=$(aws elbv2 describe-load-balancers \
+                      --load-balancer-arns "$LB_ARN" \
+                      --region $REGION \
+                      --query 'LoadBalancers[0].DNSName' \
+                      --output text 2>/dev/null || echo "")
+                    
+                    if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
+                      echo "Load Balancer DNS found from ELB query: $LB_DNS"
+                      break
+                    fi
+                  fi
+                fi
+                
+                if [ $i -lt 30 ]; then
+                  echo "Attempt $i/30: Load Balancer DNS not yet available (waiting 10 seconds)..."
+                  sleep 10
+                fi
+              done
+              
+              # If still not found, try one more time with a longer wait
+              if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
+                echo "Final attempt: Waiting additional 30 seconds..."
+                sleep 30
+                if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ] && [ "$STACK_NAME_TAG" != "NOT_FOUND" ]; then
+                  LB_DNS=$(aws cloudformation describe-stacks \
+                    --stack-name "$STACK_NAME_TAG" \
+                    --region $REGION \
+                    --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+                    --output text 2>/dev/null || echo "")
+                fi
               fi
               
               if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
