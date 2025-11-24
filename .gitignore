@@ -1,8 +1,10 @@
 # AWS and deployment files
 .ami-id.txt
 .ami-name.txt
+.creds-*
 *.pem
 *.key
+_set_profile.sh
 
 # OS files
 .DS_Store
@@ -21,3 +23,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.bak
+
+# Notes
+scratch.txt
