@@ -19,6 +19,7 @@ REGION=""
 BUSINESS_START="17:00"
 BUSINESS_END="06:00"
 INSTANCE_TYPE="t3.micro"
+AMI_ID=""
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -59,8 +60,12 @@ while [[ $# -gt 0 ]]; do
             INSTANCE_TYPE="$2"
             shift 2
             ;;
+        -a|--ami-id)
+            AMI_ID="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-t|--instance-type TYPE] [--business-start HH:MM] [--business-end HH:MM] [-p|--prompt-password]"
+            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-t|--instance-type TYPE] [-a|--ami-id AMI_ID] [--business-start HH:MM] [--business-end HH:MM] [-p|--prompt-password]"
             echo ""
             echo "Options:"
             echo "  -s, --stack-name       Set the CloudFormation stack name (default: wordpress-dev)"
@@ -69,6 +74,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -k, --key-pair         Set the EC2 Key Pair name"
             echo "  -r, --region           Set the AWS region (default: from AWS_REGION env or us-east-1)"
             echo "  -t, --instance-type    Set the EC2 instance type (default: $INSTANCE_TYPE)"
+            echo "  -a, --ami-id           Set the AMI ID to use (default: query AWS for latest)"
             echo "  --business-start       Business hours start time in UTC (HH:MM format, default: $BUSINESS_START)"
             echo "  --business-end         Business hours end time in UTC (HH:MM format, default: $BUSINESS_END)"
             echo "  -p, --prompt-password  Prompt for password (default: auto-generate and save to .creds-\${STACK_NAME})"
@@ -78,6 +84,7 @@ while [[ $# -gt 0 ]]; do
             echo "  $0 -s wordpress-dev"
             echo "  $0 -s wordpress-dev --business-start 09:00 --business-end 18:00"
             echo "  $0 -s wordpress-dev -t t3.small"
+            echo "  $0 -s wordpress-dev -a ami-12345678"
             exit 0
             ;;
         *)
@@ -267,23 +274,28 @@ echo -e "${GREEN}Start Time: $BUSINESS_START${NC}"
 echo -e "${GREEN}End Time: $BUSINESS_END${NC}"
 echo -e "${BLUE}(Use --business-start and --business-end to override)${NC}"
 
-# Get the latest Amazon Linux 2 AMI ID for the region
+# Get AMI ID - priority: command line > query AWS
 echo ""
-echo -e "${YELLOW}Finding latest Amazon Linux 2 AMI...${NC}"
-AMI_ID=$(aws ec2 describe-images \
-    --owners amazon \
-    --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" \
-              "Name=state,Values=available" \
-    --query "Images | sort_by(@, &CreationDate) | [-1].ImageId" \
-    --output text \
-    --region "$REGION")
-
-if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "None" ]; then
-    echo -e "${YELLOW}Warning: Could not find Amazon Linux 2 AMI. Using default.${NC}"
-    echo -e "${YELLOW}You may need to update the ImageId in the template manually.${NC}"
-    AMI_ID="ami-0c55b159cbfafe1f0"  # Default (may need region-specific update)
+if [ -n "$AMI_ID" ]; then
+    echo -e "${GREEN}Using AMI ID from command line: $AMI_ID${NC}"
 else
-    echo -e "${GREEN}Found AMI: $AMI_ID${NC}"
+    # Query AWS for latest Amazon Linux 2 AMI
+    echo -e "${YELLOW}Finding latest Amazon Linux 2 AMI...${NC}"
+    AMI_ID=$(aws ec2 describe-images \
+        --owners amazon \
+        --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" \
+                  "Name=state,Values=available" \
+        --query "Images | sort_by(@, &CreationDate) | [-1].ImageId" \
+        --output text \
+        --region "$REGION")
+    
+    if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "None" ]; then
+        echo -e "${YELLOW}Warning: Could not find Amazon Linux 2 AMI. Using default.${NC}"
+        echo -e "${YELLOW}You may need to update the ImageId in the template manually.${NC}"
+        AMI_ID="ami-0c55b159cbfafe1f0"  # Default (may need region-specific update)
+    else
+        echo -e "${GREEN}Found AMI: $AMI_ID${NC}"
+    fi
 fi
 
 # Update template with AMI ID
