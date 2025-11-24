@@ -219,7 +219,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
       LaunchTemplateData:
-        ImageId: ami-0979de60fed46582f  # Amazon Linux 2 AMI (update with your region's AMI)
+        ImageId: ami-05352a123d0eb54f3  # Amazon Linux 2 AMI (update with your region's AMI)
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:
@@ -637,6 +637,16 @@ Resources:
             # Restart httpd one more time
             systemctl restart httpd
             echo "HTTPD restarted"
+            
+            # Download and create hostname display file from GitHub
+            echo "Downloading hostname display file from GitHub..."
+            if curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null; then
+              chown apache:apache /var/www/html/hostname.php
+              chmod 644 /var/www/html/hostname.php
+              echo "Hostname display file downloaded and created: /var/www/html/hostname.php"
+            else
+              echo "WARNING: Could not download hostname.php from GitHub. File will not be available."
+            fi
 
   # RDS Database for WordPress
   WordPressDBSubnetGroup:
@@ -699,9 +709,9 @@ Resources:
         Version: !GetAtt WordPressLaunchTemplate.LatestVersionNumber
       TargetGroupARNs:
         - !Ref WordPressTargetGroup
-      MinSize: 1
-      MaxSize: 3
-      DesiredCapacity: 1
+      MinSize: !If [IsProduction, 3, 1]
+      MaxSize: !If [IsProduction, 8, 2]
+      DesiredCapacity: !If [IsProduction, 3, 1]
       HealthCheckType: ELB
       HealthCheckGracePeriod: 300
       Tags:
