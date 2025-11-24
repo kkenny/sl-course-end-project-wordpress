@@ -186,7 +186,9 @@ This ensures that any new instances launched by Auto Scaling will use your custo
 - Load Balancer
 - Lambda function for automation
 
-**Usage:** Run `./deploy.sh` to deploy the stack.
+**Usage:** 
+- Run `./deploy-prod.sh` to deploy the production environment (24/7)
+- Run `./deploy-dev.sh` to deploy the development environment (auto-shutdown)
 
 ### ✅ Task 2: Create an AMI of the WordPress Instance
 **Completed** - The `create-ami.sh` script:
