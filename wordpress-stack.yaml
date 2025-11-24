@@ -136,7 +136,7 @@ Resources:
   WordPressSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: WordPressSecurityGroup
+      GroupName: !Sub '${Environment}-WordPressSecurityGroup'
       GroupDescription: Security group for WordPress instances
       VpcId: !Ref WordPressVPC
       SecurityGroupIngress:
@@ -312,12 +312,47 @@ Resources:
             REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
             echo "Instance region: $REGION"
             
+            # Get stack name and environment to construct DB identifier
+            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+            sleep 5
+            STACK_NAME_TAG=$(aws ec2 describe-instances \
+                --instance-ids "$INSTANCE_ID" \
+                --region $REGION \
+                --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
+                --output text 2>/dev/null || echo "")
+            
+            # Determine environment from stack name or query stack parameter
+            DB_IDENTIFIER="wordpress-db"
+            if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
+                # Try to get Environment parameter from stack
+                ENV_PARAM=$(aws cloudformation describe-stacks \
+                    --stack-name "$STACK_NAME_TAG" \
+                    --region $REGION \
+                    --query 'Stacks[0].Parameters[?ParameterKey==`Environment`].ParameterValue' \
+                    --output text 2>/dev/null || echo "")
+                
+                if [ -n "$ENV_PARAM" ] && [ "$ENV_PARAM" != "None" ]; then
+                    DB_IDENTIFIER="${ENV_PARAM}-wordpress-db"
+                    echo "Using environment-specific DB identifier: $DB_IDENTIFIER"
+                elif [[ "$STACK_NAME_TAG" == *"prod"* ]] || [[ "$STACK_NAME_TAG" == *"Prod"* ]] || [[ "$STACK_NAME_TAG" == *"PROD"* ]]; then
+                    DB_IDENTIFIER="Production-wordpress-db"
+                    echo "Detected production environment from stack name, using DB identifier: $DB_IDENTIFIER"
+                elif [[ "$STACK_NAME_TAG" == *"dev"* ]] || [[ "$STACK_NAME_TAG" == *"Dev"* ]] || [[ "$STACK_NAME_TAG" == *"DEV"* ]]; then
+                    DB_IDENTIFIER="Development-wordpress-db"
+                    echo "Detected development environment from stack name, using DB identifier: $DB_IDENTIFIER"
+                else
+                    echo "Could not determine environment, using default DB identifier: $DB_IDENTIFIER"
+                fi
+            else
+                echo "Could not get stack name from tags, using default DB identifier: $DB_IDENTIFIER"
+            fi
+            
             # Wait for database to be available and get endpoint
             DB_HOST=""
             echo "Waiting for database endpoint to be available..."
             for i in {1..30}; do
               # Query RDS and filter out "None" responses
-              DB_HOST_RAW=$(aws rds describe-db-instances --db-instance-identifier wordpress-db --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>&1)
+              DB_HOST_RAW=$(aws rds describe-db-instances --db-instance-identifier "$DB_IDENTIFIER" --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>&1)
               
               # Check if query was successful and result is valid
               if [ $? -eq 0 ] && [ -n "$DB_HOST_RAW" ] && [ "$DB_HOST_RAW" != "None" ] && [ "$DB_HOST_RAW" != "null" ]; then
@@ -678,7 +713,7 @@ Resources:
   WordPressDatabase:
     Type: AWS::RDS::DBInstance
     Properties:
-      DBInstanceIdentifier: wordpress-db
+      DBInstanceIdentifier: !Sub '${Environment}-wordpress-db'
       Engine: mysql
       EngineVersion: '8.0'
       DBInstanceClass: db.t3.micro
@@ -741,7 +776,7 @@ Resources:
   WordPressTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: WordPressTargetGroup
+      Name: !Sub '${Environment}-WP-TG'
       Port: 80
       Protocol: HTTP
       VpcId: !Ref WordPressVPC

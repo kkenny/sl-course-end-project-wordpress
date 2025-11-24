@@ -143,7 +143,7 @@ if [ -n "$LB_DNS" ]; then
     echo -e "${YELLOW}Checking Load Balancer target health...${NC}"
     TG_ARN=$(aws elbv2 describe-target-groups \
         --region "$REGION" \
-        --query "TargetGroups[?contains(TargetGroupName, 'WordPress')].TargetGroupArn" \
+        --query "TargetGroups[?contains(TargetGroupName, 'WP-TG')].TargetGroupArn" \
         --output text 2>/dev/null | head -1)
     
     if [ -n "$TG_ARN" ]; then
