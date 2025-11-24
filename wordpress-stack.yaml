@@ -300,32 +300,64 @@ Resources:
             # Get database endpoint using AWS CLI (avoids CloudFormation !GetAtt substitution issues)
             echo "Getting database endpoint from AWS RDS..."
             REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-            DB_HOST=$(aws rds describe-db-instances --db-instance-identifier wordpress-db --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>/dev/null || echo "")
+            echo "Instance region: $REGION"
             
-            # Retry getting DB endpoint (database might still be creating)
-            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
-              echo "Waiting for database endpoint to be available..."
-              for i in {1..12}; do
+            # Wait for database to be available and get endpoint
+            DB_HOST=""
+            echo "Waiting for database endpoint to be available..."
+            for i in {1..30}; do
+              # Query RDS and filter out "None" responses
+              DB_HOST_RAW=$(aws rds describe-db-instances --db-instance-identifier wordpress-db --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>&1)
+              
+              # Check if query was successful and result is valid
+              if [ $? -eq 0 ] && [ -n "$DB_HOST_RAW" ] && [ "$DB_HOST_RAW" != "None" ] && [ "$DB_HOST_RAW" != "null" ]; then
+                DB_HOST="$DB_HOST_RAW"
+                echo "Database endpoint found: $DB_HOST"
+                break
+              else
+                echo "Attempt $i/30: Database endpoint not yet available... (response: $DB_HOST_RAW)"
                 sleep 10
-                DB_HOST=$(aws rds describe-db-instances --db-instance-identifier wordpress-db --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>/dev/null || echo "")
-                if [ -n "$DB_HOST" ] && [ "$DB_HOST" != "None" ]; then
-                  echo "Database endpoint found: $DB_HOST"
-                  break
-                fi
-                echo "Attempt $i/12: Database endpoint not yet available..."
-              done
-            fi
+              fi
+            done
             
-            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
-              echo "ERROR: Could not retrieve database endpoint"
-              echo "Database may still be initializing. The script will continue but database connection may fail."
+            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ] || [ "$DB_HOST" == "null" ]; then
+              echo "ERROR: Could not retrieve database endpoint after 5 minutes"
+              echo "This may indicate:"
+              echo "  1. Database is still initializing (can take 5-10 minutes)"
+              echo "  2. IAM role lacks RDS permissions"
+              echo "  3. Database identifier mismatch"
+              echo "The script will exit to prevent incorrect configuration."
+              exit 1
             else
-              echo "Database endpoint: $DB_HOST"
+              echo "Database endpoint confirmed: $DB_HOST"
             fi
             
             DB_NAME="wordpress"
             DB_USER="wordpress"
             DB_PASS="${WordPressAdminPassword}"
+            
+            # Debug: Check if password was set (without showing the actual password)
+            if [ -z "$DB_PASS" ]; then
+              echo "ERROR: DB_PASS is empty! CloudFormation substitution may have failed."
+              echo "The password parameter may not have been passed correctly to UserData."
+              echo "This is a critical error - cannot proceed without database password."
+              exit 1
+            else
+              # Use bash variable length syntax - escape $ for CloudFormation !Sub
+              DB_PASS_LEN=$(echo -n "$DB_PASS" | wc -c)
+              echo "DB_PASS is set (length: $DB_PASS_LEN characters)"
+              # Validate password has reasonable length (should be at least 8 characters)
+              if [ $DB_PASS_LEN -lt 8 ]; then
+                echo "WARNING: Password length is less than 8 characters. This may cause issues."
+              fi
+            fi
+            
+            # Only proceed if we have a valid database host
+            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
+              echo "ERROR: Database host is not available. Cannot configure WordPress."
+              echo "The database may still be initializing. Please wait and retry configuration later."
+              exit 1
+            fi
             
             # Wait for database to be available (max 5 minutes)
             echo "Waiting for database to be ready..."
@@ -335,7 +367,7 @@ Resources:
             
             DB_READY=0
             for i in {1..60}; do
-              if mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "SELECT 1" 2>/dev/null; then
+              if mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" -e "SELECT 1" 2>/dev/null; then
                 echo "Database is ready!"
                 DB_READY=1
                 break
@@ -360,14 +392,137 @@ Resources:
               cp wp-config-sample.php wp-config.php
               
               echo "Updating database configuration..."
+              echo "DB_NAME: $DB_NAME"
+              echo "DB_USER: $DB_USER"
+              echo "DB_HOST: $DB_HOST"
+              DB_PASS_LEN=$(echo -n "$DB_PASS" | wc -c)
+              echo "DB_PASS length: $DB_PASS_LEN"
+              
               # Use # as delimiter for sed to avoid conflicts with special characters
               # For sed replacement strings, we need to escape: & (whole match) and \ (backslash)
-              # Escape backslashes first, then ampersands
-              DB_PASS_ESCAPED=$(printf '%s\n' "$DB_PASS" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g')
+              # Escape backslashes first, then ampersands, then the delimiter itself
+              DB_PASS_ESCAPED=$(printf '%s\n' "$DB_PASS" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g' | sed 's/#/\\#/g')
+              
+              # Verify the password was escaped
+              if [ -z "$DB_PASS_ESCAPED" ]; then
+                echo "ERROR: Password escaping failed!"
+                exit 1
+              fi
+              
+              # Perform substitutions
               sed -i "s#database_name_here#$DB_NAME#g" wp-config.php
               sed -i "s#username_here#$DB_USER#g" wp-config.php
               sed -i "s#password_here#$DB_PASS_ESCAPED#g" wp-config.php
               sed -i "s#localhost#$DB_HOST#g" wp-config.php
+              
+              # Verify the substitutions worked
+              echo "Verifying wp-config.php substitutions..."
+              if grep -q "password_here" wp-config.php; then
+                echo "ERROR: Password substitution failed! 'password_here' still found in wp-config.php"
+                echo "Attempting alternative method..."
+                # Try using awk as a fallback
+                awk -v db_name="$DB_NAME" -v db_user="$DB_USER" -v db_pass="$DB_PASS" -v db_host="$DB_HOST" '
+                  /database_name_here/ { gsub(/database_name_here/, db_name) }
+                  /username_here/ { gsub(/username_here/, db_user) }
+                  /password_here/ { gsub(/password_here/, db_pass) }
+                  /localhost/ { gsub(/localhost/, db_host) }
+                  { print }
+                ' wp-config.php > wp-config.php.tmp && mv wp-config.php.tmp wp-config.php
+              fi
+              
+              if grep -q "localhost" wp-config.php && [ "$DB_HOST" != "localhost" ]; then
+                echo "WARNING: 'localhost' still found in wp-config.php, but DB_HOST is $DB_HOST"
+              fi
+              
+              # Get Load Balancer DNS and add WordPress URL configuration
+              echo "Getting Load Balancer DNS..."
+              
+              # Get stack name from instance tags
+              INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+              STACK_NAME_TAG=$(aws ec2 describe-instances \
+                --instance-ids "$INSTANCE_ID" \
+                --region $REGION \
+                --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
+                --output text 2>/dev/null || echo "")
+              
+              LB_DNS=""
+              # Try to get Load Balancer DNS from CloudFormation stack outputs
+              if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
+                echo "Found stack name from instance tags: $STACK_NAME_TAG"
+                LB_DNS=$(aws cloudformation describe-stacks \
+                  --stack-name "$STACK_NAME_TAG" \
+                  --region $REGION \
+                  --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+                  --output text 2>/dev/null || echo "")
+              fi
+              
+              # If we couldn't get it from stack outputs, try querying ELB directly by name pattern
+              if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
+                echo "Trying to get Load Balancer DNS from ELB service..."
+                # Query for Load Balancers with WP-LB in the name (matches our naming: ${Environment}-WP-LB)
+                LB_ARN=$(aws elbv2 describe-load-balancers \
+                  --region $REGION \
+                  --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].LoadBalancerArn' \
+                  --output text 2>/dev/null | head -1 || echo "")
+                
+                if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "null" ]; then
+                  LB_DNS=$(aws elbv2 describe-load-balancers \
+                    --load-balancer-arns "$LB_ARN" \
+                    --region $REGION \
+                    --query 'LoadBalancers[0].DNSName' \
+                    --output text 2>/dev/null || echo "")
+                fi
+              fi
+              
+              # Wait for Load Balancer to be available (retry up to 10 times)
+              if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
+                echo "Waiting for Load Balancer DNS to be available..."
+                for i in {1..10}; do
+                  sleep 10
+                  if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
+                    LB_DNS=$(aws cloudformation describe-stacks \
+                      --stack-name "$STACK_NAME_TAG" \
+                      --region $REGION \
+                      --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
+                      --output text 2>/dev/null || echo "")
+                  fi
+                  if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
+                    echo "Load Balancer DNS found: $LB_DNS"
+                    break
+                  fi
+                  echo "Attempt $i/10: Load Balancer DNS not yet available..."
+                done
+              fi
+              
+              if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
+                WP_URL="http://$LB_DNS"
+                echo "WordPress URL: $WP_URL"
+                
+                # Add WP_HOME and WP_SITEURL to wp-config.php
+                # Check if they already exist
+                if ! grep -q "define.*WP_HOME" wp-config.php; then
+                  echo "Adding WP_HOME and WP_SITEURL to wp-config.php..."
+                  # Find the line with "/* That's all, stop editing!" or add before it
+                  if grep -q "That's all, stop editing" wp-config.php; then
+                    # Insert before the "That's all" comment
+                    sed -i "/That's all, stop editing/i\\
+define('WP_HOME', '$WP_URL');\\
+define('WP_SITEURL', '$WP_URL');" wp-config.php
+                  else
+                    # Add at the end of the file before closing PHP tag
+                    echo "" >> wp-config.php
+                    echo "/* WordPress URL Configuration */" >> wp-config.php
+                    echo "define('WP_HOME', '$WP_URL');" >> wp-config.php
+                    echo "define('WP_SITEURL', '$WP_URL');" >> wp-config.php
+                  fi
+                  echo "WP_HOME and WP_SITEURL added successfully"
+                else
+                  echo "WP_HOME and WP_SITEURL already exist in wp-config.php"
+                fi
+              else
+                echo "WARNING: Could not retrieve Load Balancer DNS. WP_HOME and WP_SITEURL not configured."
+                echo "You may need to manually add these to wp-config.php after the stack is created."
+              fi
               
               echo "Setting file permissions..."
               chown -R apache:apache /var/www/html
