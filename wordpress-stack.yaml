@@ -234,85 +234,18 @@ Resources:
             exec 2>&1
             
             echo "=========================================="
-            echo "WordPress Installation Script Started"
+            echo "WordPress Configuration Script Started"
             echo "Timestamp: $(date)"
             echo "=========================================="
             
             # Don't exit on error - log and continue
             set +e
             
-            yum update -y
-            
-            # Install PHP 8.0+ (required for WordPress 6.8.0+)
-            # Try Amazon Linux Extras first, then fall back to Remi repository
-            if amazon-linux-extras list | grep -q php8.2; then
-              echo "Installing PHP 8.2 via Amazon Linux Extras..."
-              amazon-linux-extras install php8.2 -y
-              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-            elif amazon-linux-extras list | grep -q php8.1; then
-              echo "Installing PHP 8.1 via Amazon Linux Extras..."
-              amazon-linux-extras install php8.1 -y
-              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-            elif amazon-linux-extras list | grep -q php8.0; then
-              echo "Installing PHP 8.0 via Amazon Linux Extras..."
-              amazon-linux-extras install php8.0 -y
-              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-            else
-              echo "Installing PHP 8.0+ from Remi repository..."
-              yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-              yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
-              yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80
-              yum install -y httpd php php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-            fi
-            
-            systemctl start httpd
-            systemctl enable httpd
-            
-            # Verify PHP version (must be 8.0 or higher)
-            echo "Checking PHP version..."
-            PHP_VERSION=$(php -r "echo PHP_VERSION;" | cut -d. -f1,2)
-            PHP_FULL_VERSION=$(php -v | head -1)
-            echo "Installed PHP version: $PHP_FULL_VERSION"
-            echo "PHP major.minor: $PHP_VERSION"
-            
-            # Check PHP version without bc (bc might not be installed)
-            PHP_MAJOR=$(echo $PHP_VERSION | cut -d. -f1)
-            PHP_MINOR=$(echo $PHP_VERSION | cut -d. -f2)
-            if [ "$PHP_MAJOR" -lt 8 ]; then
-              echo "ERROR: PHP 8.0+ required, but found PHP $PHP_VERSION"
-              echo "WordPress 6.8.0+ requires PHP 8.0 or higher"
-            else
-              echo "PHP version check passed: $PHP_VERSION"
-            fi
-            
-            # Download and extract WordPress
-            echo "Downloading WordPress..."
-            cd /var/www/html
-            wget -q https://wordpress.org/latest.tar.gz
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to download WordPress"
-              exit 1
-            fi
-            
-            echo "Extracting WordPress..."
-            tar -xzf latest.tar.gz
-            if [ $? -ne 0 ]; then
-              echo "ERROR: Failed to extract WordPress"
-              exit 1
-            fi
-            
-            echo "Moving WordPress files..."
-            mv wordpress/* .
-            rm -rf wordpress latest.tar.gz
-            echo "WordPress files extracted successfully"
-            
-            # Wait for database to be ready
-            # Get database endpoint using AWS CLI (avoids CloudFormation !GetAtt substitution issues)
-            echo "Getting database endpoint from AWS RDS..."
+            # Get region and determine environment
             REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
             echo "Instance region: $REGION"
             
-            # Get stack name and environment to construct DB identifier
+            # Get stack name and environment to determine if this is production
             INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
             sleep 5
             STACK_NAME_TAG=$(aws ec2 describe-instances \
@@ -321,8 +254,8 @@ Resources:
                 --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
                 --output text 2>/dev/null || echo "")
             
-            # Determine environment from stack name or query stack parameter
-            DB_IDENTIFIER="wordpress-db"
+            # Determine environment
+            IS_PRODUCTION=0
             if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
                 # Try to get Environment parameter from stack
                 ENV_PARAM=$(aws cloudformation describe-stacks \
@@ -331,20 +264,109 @@ Resources:
                     --query 'Stacks[0].Parameters[?ParameterKey==`Environment`].ParameterValue' \
                     --output text 2>/dev/null || echo "")
                 
-                if [ -n "$ENV_PARAM" ] && [ "$ENV_PARAM" != "None" ]; then
-                    DB_IDENTIFIER="${ENV_PARAM}-wordpress-db"
-                    echo "Using environment-specific DB identifier: $DB_IDENTIFIER"
+                if [ "$ENV_PARAM" == "Production" ]; then
+                    IS_PRODUCTION=1
+                    echo "Environment: Production (using AMI with pre-installed WordPress)"
                 elif [[ "$STACK_NAME_TAG" == *"prod"* ]] || [[ "$STACK_NAME_TAG" == *"Prod"* ]] || [[ "$STACK_NAME_TAG" == *"PROD"* ]]; then
-                    DB_IDENTIFIER="Production-wordpress-db"
-                    echo "Detected production environment from stack name, using DB identifier: $DB_IDENTIFIER"
-                elif [[ "$STACK_NAME_TAG" == *"dev"* ]] || [[ "$STACK_NAME_TAG" == *"Dev"* ]] || [[ "$STACK_NAME_TAG" == *"DEV"* ]]; then
-                    DB_IDENTIFIER="Development-wordpress-db"
-                    echo "Detected development environment from stack name, using DB identifier: $DB_IDENTIFIER"
+                    IS_PRODUCTION=1
+                    echo "Environment: Production (detected from stack name)"
                 else
-                    echo "Could not determine environment, using default DB identifier: $DB_IDENTIFIER"
+                    echo "Environment: Development (fresh installation)"
                 fi
             else
-                echo "Could not get stack name from tags, using default DB identifier: $DB_IDENTIFIER"
+                echo "Could not determine environment from stack, assuming Development"
+            fi
+            
+            # Only install packages for Development environment
+            if [ $IS_PRODUCTION -eq 0 ]; then
+              echo "Performing fresh installation for Development environment..."
+              yum update -y
+              
+              # Install PHP 8.0+ (required for WordPress 6.8.0+)
+              # Try Amazon Linux Extras first, then fall back to Remi repository
+              if amazon-linux-extras list | grep -q php8.2; then
+                echo "Installing PHP 8.2 via Amazon Linux Extras..."
+                amazon-linux-extras install php8.2 -y
+                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+              elif amazon-linux-extras list | grep -q php8.1; then
+                echo "Installing PHP 8.1 via Amazon Linux Extras..."
+                amazon-linux-extras install php8.1 -y
+                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+              elif amazon-linux-extras list | grep -q php8.0; then
+                echo "Installing PHP 8.0 via Amazon Linux Extras..."
+                amazon-linux-extras install php8.0 -y
+                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+              else
+                echo "Installing PHP 8.0+ from Remi repository..."
+                yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+                yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
+                yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80
+                yum install -y httpd php php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
+              fi
+              
+              systemctl start httpd
+              systemctl enable httpd
+              
+              # Verify PHP version (must be 8.0 or higher)
+              echo "Checking PHP version..."
+              PHP_VERSION=$(php -r "echo PHP_VERSION;" | cut -d. -f1,2)
+              PHP_FULL_VERSION=$(php -v | head -1)
+              echo "Installed PHP version: $PHP_FULL_VERSION"
+              echo "PHP major.minor: $PHP_VERSION"
+              
+              # Check PHP version without bc (bc might not be installed)
+              PHP_MAJOR=$(echo $PHP_VERSION | cut -d. -f1)
+              PHP_MINOR=$(echo $PHP_VERSION | cut -d. -f2)
+              if [ "$PHP_MAJOR" -lt 8 ]; then
+                echo "ERROR: PHP 8.0+ required, but found PHP $PHP_VERSION"
+                echo "WordPress 6.8.0+ requires PHP 8.0 or higher"
+              else
+                echo "PHP version check passed: $PHP_VERSION"
+              fi
+              
+              # Download and extract WordPress
+              echo "Downloading WordPress..."
+              cd /var/www/html
+              wget -q https://wordpress.org/latest.tar.gz
+              if [ $? -ne 0 ]; then
+                echo "ERROR: Failed to download WordPress"
+                exit 1
+              fi
+              
+              echo "Extracting WordPress..."
+              tar -xzf latest.tar.gz
+              if [ $? -ne 0 ]; then
+                echo "ERROR: Failed to extract WordPress"
+                exit 1
+              fi
+              
+              echo "Moving WordPress files..."
+              mv wordpress/* .
+              rm -rf wordpress latest.tar.gz
+              echo "WordPress files extracted successfully"
+            else
+              echo "Production environment detected - skipping package installation and WordPress download"
+              echo "Assuming WordPress is already installed from AMI"
+              cd /var/www/html
+            fi
+            
+            # Wait for database to be ready
+            # Get database endpoint using AWS CLI (avoids CloudFormation !GetAtt substitution issues)
+            echo "Getting database endpoint from AWS RDS..."
+            
+            # Determine DB identifier from environment (reuse ENV_PARAM if available, otherwise detect)
+            DB_IDENTIFIER="wordpress-db"
+            if [ -n "$ENV_PARAM" ] && [ "$ENV_PARAM" != "None" ]; then
+                DB_IDENTIFIER="${ENV_PARAM}-wordpress-db"
+                echo "Using environment-specific DB identifier: $DB_IDENTIFIER"
+            elif [ $IS_PRODUCTION -eq 1 ]; then
+                DB_IDENTIFIER="Production-wordpress-db"
+                echo "Using production DB identifier: $DB_IDENTIFIER"
+            elif [[ "$STACK_NAME_TAG" == *"dev"* ]] || [[ "$STACK_NAME_TAG" == *"Dev"* ]] || [[ "$STACK_NAME_TAG" == *"DEV"* ]]; then
+                DB_IDENTIFIER="Development-wordpress-db"
+                echo "Using development DB identifier: $DB_IDENTIFIER"
+            else
+                echo "Could not determine environment, using default DB identifier: $DB_IDENTIFIER"
             fi
             
             # Wait for database to be available and get endpoint
@@ -432,9 +454,32 @@ Resources:
             echo "Files in /var/www/html:"
             ls -la /var/www/html/ | head -20
             
-            if [ -f wp-config-sample.php ]; then
-              echo "Found wp-config-sample.php, creating wp-config.php..."
-              cp wp-config-sample.php wp-config.php
+            # For production, wp-config.php should already exist from AMI
+            # For development, create from sample
+            if [ $IS_PRODUCTION -eq 1 ]; then
+              if [ -f wp-config.php ]; then
+                echo "Production: Found existing wp-config.php, updating database configuration..."
+              else
+                echo "WARNING: Production environment but wp-config.php not found!"
+                if [ -f wp-config-sample.php ]; then
+                  echo "Creating wp-config.php from sample..."
+                  cp wp-config-sample.php wp-config.php
+                else
+                  echo "ERROR: Neither wp-config.php nor wp-config-sample.php found!"
+                  exit 1
+                fi
+              fi
+            else
+              if [ -f wp-config-sample.php ]; then
+                echo "Development: Found wp-config-sample.php, creating wp-config.php..."
+                cp wp-config-sample.php wp-config.php
+              else
+                echo "ERROR: wp-config-sample.php not found!"
+                exit 1
+              fi
+            fi
+            
+            if [ -f wp-config.php ]; then
               
               echo "Updating database configuration..."
               echo "DB_NAME: $DB_NAME"
@@ -601,77 +646,102 @@ Resources:
               chmod -R 755 /var/www/html
               chmod 644 wp-config.php
               
-              echo "WordPress configuration file created successfully"
+              echo "WordPress configuration file updated successfully"
               if [ -f wp-config.php ]; then
                 echo "wp-config.php exists: YES"
               else
                 echo "wp-config.php exists: NO"
               fi
             else
-              echo "ERROR: wp-config-sample.php not found!"
+              echo "ERROR: Could not create or find wp-config.php!"
               echo "Files in current directory:"
               ls -la
               exit 1
             fi
             
-            # Install WP-CLI for automated WordPress installation
-            echo "Installing WP-CLI..."
-            curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-            chmod +x wp-cli.phar
-            mv wp-cli.phar /usr/local/bin/wp
+            # Only install WP-CLI and run wp core install for Development environment
+            if [ $IS_PRODUCTION -eq 0 ]; then
+              # Install WP-CLI for automated WordPress installation
+              echo "Installing WP-CLI..."
+              if [ ! -f /usr/local/bin/wp ]; then
+                curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+                chmod +x wp-cli.phar
+                mv wp-cli.phar /usr/local/bin/wp
+              else
+                echo "WP-CLI already installed"
+              fi
+              
+              # Complete WordPress installation using WP-CLI
+              echo "Completing WordPress installation..."
+              WP_ADMIN_USER="${WordPressAdminUser}"
+              WP_ADMIN_PASS="${WordPressAdminPassword}"
+              WP_ADMIN_EMAIL="${WordPressAdminEmail}"
+              WP_SITE_TITLE="WordPress Site"
+              
+              # Wait a bit more for database to be fully ready
+              sleep 10
+              
+              # Run WordPress installation
+              cd /var/www/html
+              sudo -u apache /usr/local/bin/wp core install \
+                --path=/var/www/html \
+                --url="http://localhost" \
+                --title="$WP_SITE_TITLE" \
+                --admin_user="$WP_ADMIN_USER" \
+                --admin_password="$WP_ADMIN_PASS" \
+                --admin_email="$WP_ADMIN_EMAIL" \
+                --skip-email \
+                --allow-root 2>&1 | tee -a /var/log/wordpress-install.log || {
+                echo "WP-CLI installation failed, checking database connection..." | tee -a /var/log/wordpress-install.log
+                mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "USE $DB_NAME; SHOW TABLES;" 2>&1 | tee -a /var/log/wordpress-install.log
+                echo "Attempting manual installation..." | tee -a /var/log/wordpress-install.log
+              }
+              
+              # Restart httpd for development
+              systemctl restart httpd
+              systemctl enable httpd
+            else
+              echo "Production environment: Skipping WP-CLI installation and wp core install"
+              echo "WordPress should already be installed from AMI"
+            fi
             
-            # Complete WordPress installation using WP-CLI
-            echo "Completing WordPress installation..."
-            WP_ADMIN_USER="${WordPressAdminUser}"
-            WP_ADMIN_PASS="${WordPressAdminPassword}"
-            WP_ADMIN_EMAIL="${WordPressAdminEmail}"
-            WP_SITE_TITLE="WordPress Site"
-            
-            # Wait a bit more for database to be fully ready
-            sleep 10
-            
-            # Run WordPress installation
-            cd /var/www/html
-            sudo -u apache /usr/local/bin/wp core install \
-              --path=/var/www/html \
-              --url="http://localhost" \
-              --title="$WP_SITE_TITLE" \
-              --admin_user="$WP_ADMIN_USER" \
-              --admin_password="$WP_ADMIN_PASS" \
-              --admin_email="$WP_ADMIN_EMAIL" \
-              --skip-email \
-              --allow-root 2>&1 | tee -a /var/log/wordpress-install.log || {
-              echo "WP-CLI installation failed, checking database connection..." | tee -a /var/log/wordpress-install.log
-              mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "USE $DB_NAME; SHOW TABLES;" 2>&1 | tee -a /var/log/wordpress-install.log
-              echo "Attempting manual installation..." | tee -a /var/log/wordpress-install.log
-            }
-            
-            # Set proper permissions after WP-CLI operations
+            # Set proper permissions after configuration
             chown -R apache:apache /var/www/html
             chmod -R 755 /var/www/html
             chmod 644 wp-config.php
             
-            # Restart httpd
-            systemctl restart httpd
-            systemctl enable httpd
-            
             # Log completion
             echo "=========================================="
-            echo "WordPress installation script completed at $(date)"
-            echo "Admin user: $WP_ADMIN_USER"
-            echo "Admin email: $WP_ADMIN_EMAIL"
+            if [ $IS_PRODUCTION -eq 1 ]; then
+              echo "WordPress configuration script completed at $(date)"
+              echo "Production environment: WordPress reconfigured with new database settings"
+            else
+              echo "WordPress installation script completed at $(date)"
+              WP_ADMIN_USER="${WordPressAdminUser}"
+              echo "Admin user: $WP_ADMIN_USER"
+              WP_ADMIN_EMAIL="${WordPressAdminEmail}"
+              echo "Admin email: $WP_ADMIN_EMAIL"
+            fi
             echo "=========================================="
             
             # Verify wp-config.php exists
             if [ -f /var/www/html/wp-config.php ]; then
-              echo "SUCCESS: wp-config.php created"
+              echo "SUCCESS: wp-config.php configured"
             else
-              echo "WARNING: wp-config.php not found after installation"
+              echo "WARNING: wp-config.php not found after configuration"
             fi
             
-            # Restart httpd one more time
-            systemctl restart httpd
-            echo "HTTPD restarted"
+            # Restart httpd (only if not production, or if production needs a restart)
+            if [ $IS_PRODUCTION -eq 0 ]; then
+              systemctl restart httpd
+              echo "HTTPD restarted"
+            else
+              # For production, just reload if httpd is running
+              if systemctl is-active --quiet httpd; then
+                systemctl reload httpd
+                echo "HTTPD reloaded"
+              fi
+            fi
             
             # Download and create hostname display file from GitHub
             echo "Downloading hostname display file from GitHub..."
