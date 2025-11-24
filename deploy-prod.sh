@@ -16,6 +16,7 @@ WP_EMAIL=""
 PROMPT_PASSWORD=false
 KEY_PAIR_NAME=""
 REGION=""
+INSTANCE_TYPE="t3.medium"
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -44,8 +45,12 @@ while [[ $# -gt 0 ]]; do
             REGION="$2"
             shift 2
             ;;
+        -t|--instance-type)
+            INSTANCE_TYPE="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-p|--prompt-password]"
+            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-t|--instance-type TYPE] [-p|--prompt-password]"
             echo ""
             echo "Options:"
             echo "  -s, --stack-name       Set the CloudFormation stack name (default: wordpress-prod)"
@@ -53,8 +58,13 @@ while [[ $# -gt 0 ]]; do
             echo "  -e, --email            Set the WordPress admin email address"
             echo "  -k, --key-pair         Set the EC2 Key Pair name"
             echo "  -r, --region           Set the AWS region (default: from AWS_REGION env or us-east-1)"
+            echo "  -t, --instance-type    Set the EC2 instance type (default: $INSTANCE_TYPE)"
             echo "  -p, --prompt-password  Prompt for password (default: auto-generate and save to .creds-\${STACK_NAME})"
             echo "  -h, --help             Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0 -s wordpress-prod"
+            echo "  $0 -s wordpress-prod -t t3.large"
             exit 0
             ;;
         *)
@@ -105,14 +115,59 @@ echo -e "${YELLOW}Please provide the following information:${NC}"
 
 # Key Pair
 if [ -z "$KEY_PAIR_NAME" ]; then
-    echo -e "${BLUE}Available Key Pairs in region '$REGION':${NC}"
-    aws ec2 describe-key-pairs --region "$REGION" --query 'KeyPairs[*].KeyName' --output table || true
-    echo ""
-    read -p "EC2 Key Pair Name: " KEY_PAIR_NAME
+    echo -e "${BLUE}Checking available Key Pairs in region '$REGION'...${NC}"
     
-    if [ -z "$KEY_PAIR_NAME" ]; then
-        echo -e "${RED}Error: Key Pair Name is required${NC}"
+    # Get list of key pairs
+    KEY_PAIRS=$(aws ec2 describe-key-pairs --region "$REGION" --query 'KeyPairs[*].KeyName' --output text 2>/dev/null || echo "")
+    
+    if [ -z "$KEY_PAIRS" ]; then
+        echo -e "${RED}Error: No Key Pairs found in region '$REGION'${NC}"
+        echo -e "${YELLOW}Please create a Key Pair first using:${NC}"
+        echo "  ./create-key-pair.sh -k <key-name> -r $REGION"
         exit 1
+    fi
+    
+    # Count key pairs (handle case where there's only one)
+    KEY_PAIR_COUNT=$(echo "$KEY_PAIRS" | wc -w | tr -d ' ')
+    
+    if [ "$KEY_PAIR_COUNT" -eq 1 ]; then
+        # Only one key pair - use it automatically
+        KEY_PAIR_NAME="$KEY_PAIRS"
+        echo -e "${GREEN}Found one Key Pair: $KEY_PAIR_NAME${NC}"
+        echo -e "${GREEN}Using Key Pair: $KEY_PAIR_NAME${NC}"
+    else
+        # Multiple key pairs - present options
+        echo -e "${BLUE}Available Key Pairs:${NC}"
+        echo ""
+        KEY_PAIR_ARRAY=($KEY_PAIRS)
+        for i in "${!KEY_PAIR_ARRAY[@]}"; do
+            echo "  $((i+1)). ${KEY_PAIR_ARRAY[$i]}"
+        done
+        echo ""
+        
+        while true; do
+            read -p "Select Key Pair (1-$KEY_PAIR_COUNT) or enter name: " SELECTION
+            
+            # Check if it's a number
+            if [[ "$SELECTION" =~ ^[0-9]+$ ]]; then
+                if [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "$KEY_PAIR_COUNT" ]; then
+                    KEY_PAIR_NAME="${KEY_PAIR_ARRAY[$((SELECTION-1))]}"
+                    echo -e "${GREEN}Selected Key Pair: $KEY_PAIR_NAME${NC}"
+                    break
+                else
+                    echo -e "${RED}Invalid selection. Please enter a number between 1 and $KEY_PAIR_COUNT${NC}"
+                fi
+            else
+                # User entered a name directly - validate it exists
+                if echo "$KEY_PAIRS" | grep -q "^$SELECTION$"; then
+                    KEY_PAIR_NAME="$SELECTION"
+                    echo -e "${GREEN}Selected Key Pair: $KEY_PAIR_NAME${NC}"
+                    break
+                else
+                    echo -e "${RED}Key Pair '$SELECTION' not found. Please try again.${NC}"
+                fi
+            fi
+        done
     fi
 else
     echo -e "${GREEN}EC2 Key Pair Name: $KEY_PAIR_NAME (from command line)${NC}"
@@ -182,9 +237,11 @@ else
     echo -e "${GREEN}WordPress Admin Username: $WP_USER (from command line)${NC}"
 fi
 
-# Instance Type
-read -p "Instance Type [t3.medium]: " INSTANCE_TYPE
-INSTANCE_TYPE=${INSTANCE_TYPE:-t3.medium}
+# Instance Type - Use default if not provided via command line
+echo ""
+echo -e "${YELLOW}Instance Configuration:${NC}"
+echo -e "${GREEN}Instance Type: $INSTANCE_TYPE${NC}"
+echo -e "${BLUE}(Use -t or --instance-type to override)${NC}"
 
 # Get the latest Amazon Linux 2 AMI ID for the region
 echo ""

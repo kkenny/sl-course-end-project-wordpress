@@ -16,6 +16,9 @@ WP_EMAIL=""
 PROMPT_PASSWORD=false
 KEY_PAIR_NAME=""
 REGION=""
+BUSINESS_START="17:00"
+BUSINESS_END="06:00"
+INSTANCE_TYPE="t3.micro"
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -44,8 +47,20 @@ while [[ $# -gt 0 ]]; do
             REGION="$2"
             shift 2
             ;;
+        --business-start)
+            BUSINESS_START="$2"
+            shift 2
+            ;;
+        --business-end)
+            BUSINESS_END="$2"
+            shift 2
+            ;;
+        -t|--instance-type)
+            INSTANCE_TYPE="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-p|--prompt-password]"
+            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-t|--instance-type TYPE] [--business-start HH:MM] [--business-end HH:MM] [-p|--prompt-password]"
             echo ""
             echo "Options:"
             echo "  -s, --stack-name       Set the CloudFormation stack name (default: wordpress-dev)"
@@ -53,8 +68,16 @@ while [[ $# -gt 0 ]]; do
             echo "  -e, --email            Set the WordPress admin email address"
             echo "  -k, --key-pair         Set the EC2 Key Pair name"
             echo "  -r, --region           Set the AWS region (default: from AWS_REGION env or us-east-1)"
+            echo "  -t, --instance-type    Set the EC2 instance type (default: $INSTANCE_TYPE)"
+            echo "  --business-start       Business hours start time in UTC (HH:MM format, default: $BUSINESS_START)"
+            echo "  --business-end         Business hours end time in UTC (HH:MM format, default: $BUSINESS_END)"
             echo "  -p, --prompt-password  Prompt for password (default: auto-generate and save to .creds-\${STACK_NAME})"
             echo "  -h, --help             Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0 -s wordpress-dev"
+            echo "  $0 -s wordpress-dev --business-start 09:00 --business-end 18:00"
+            echo "  $0 -s wordpress-dev -t t3.small"
             exit 0
             ;;
         *)
@@ -105,15 +128,59 @@ echo -e "${YELLOW}Please provide the following information:${NC}"
 
 # Key Pair
 if [ -z "$KEY_PAIR_NAME" ]; then
-    echo -e "${BLUE}Available Key Pairs in region '$REGION':${NC}"
-    aws ec2 describe-key-pairs --region "$REGION" --query 'KeyPairs[*].KeyName' --output table || true
-    echo ""
-    read -p "EC2 Key Pair Name: [wordpress-project]: " KEY_PAIR_NAME
-    KEY_PAIR_NAME=${KEY_PAIR_NAME:-wordpress-project}
+    echo -e "${BLUE}Checking available Key Pairs in region '$REGION'...${NC}"
     
-    if [ -z "$KEY_PAIR_NAME" ]; then
-        echo -e "${RED}Error: Key Pair Name is required${NC}"
+    # Get list of key pairs
+    KEY_PAIRS=$(aws ec2 describe-key-pairs --region "$REGION" --query 'KeyPairs[*].KeyName' --output text 2>/dev/null || echo "")
+    
+    if [ -z "$KEY_PAIRS" ]; then
+        echo -e "${RED}Error: No Key Pairs found in region '$REGION'${NC}"
+        echo -e "${YELLOW}Please create a Key Pair first using:${NC}"
+        echo "  ./create-key-pair.sh -k <key-name> -r $REGION"
         exit 1
+    fi
+    
+    # Count key pairs (handle case where there's only one)
+    KEY_PAIR_COUNT=$(echo "$KEY_PAIRS" | wc -w | tr -d ' ')
+    
+    if [ "$KEY_PAIR_COUNT" -eq 1 ]; then
+        # Only one key pair - use it automatically
+        KEY_PAIR_NAME="$KEY_PAIRS"
+        echo -e "${GREEN}Found one Key Pair: $KEY_PAIR_NAME${NC}"
+        echo -e "${GREEN}Using Key Pair: $KEY_PAIR_NAME${NC}"
+    else
+        # Multiple key pairs - present options
+        echo -e "${BLUE}Available Key Pairs:${NC}"
+        echo ""
+        KEY_PAIR_ARRAY=($KEY_PAIRS)
+        for i in "${!KEY_PAIR_ARRAY[@]}"; do
+            echo "  $((i+1)). ${KEY_PAIR_ARRAY[$i]}"
+        done
+        echo ""
+        
+        while true; do
+            read -p "Select Key Pair (1-$KEY_PAIR_COUNT) or enter name: " SELECTION
+            
+            # Check if it's a number
+            if [[ "$SELECTION" =~ ^[0-9]+$ ]]; then
+                if [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "$KEY_PAIR_COUNT" ]; then
+                    KEY_PAIR_NAME="${KEY_PAIR_ARRAY[$((SELECTION-1))]}"
+                    echo -e "${GREEN}Selected Key Pair: $KEY_PAIR_NAME${NC}"
+                    break
+                else
+                    echo -e "${RED}Invalid selection. Please enter a number between 1 and $KEY_PAIR_COUNT${NC}"
+                fi
+            else
+                # User entered a name directly - validate it exists
+                if echo "$KEY_PAIRS" | grep -q "^$SELECTION$"; then
+                    KEY_PAIR_NAME="$SELECTION"
+                    echo -e "${GREEN}Selected Key Pair: $KEY_PAIR_NAME${NC}"
+                    break
+                else
+                    echo -e "${RED}Key Pair '$SELECTION' not found. Please try again.${NC}"
+                fi
+            fi
+        done
     fi
 else
     echo -e "${GREEN}EC2 Key Pair Name: $KEY_PAIR_NAME (from command line)${NC}"
@@ -184,18 +251,21 @@ echo -e "${YELLOW}Keep this file secure! It contains sensitive information.${NC}
 echo ""
 
 
-# Instance Type
-read -p "Instance Type [t3.micro]: " INSTANCE_TYPE
-INSTANCE_TYPE=${INSTANCE_TYPE:-t3.micro}
+# Instance Type - Use default if not provided via command line
+echo ""
+echo -e "${YELLOW}Instance Configuration:${NC}"
+echo -e "${GREEN}Instance Type: $INSTANCE_TYPE${NC}"
+echo -e "${BLUE}(Use -t or --instance-type to override)${NC}"
 
-# Business Hours (in UTC)
+# Business Hours (in UTC) - Set defaults if not provided via command line
+BUSINESS_START="${BUSINESS_START}"
+BUSINESS_END="${BUSINESS_END}"
+
 echo ""
 echo -e "${YELLOW}Business Hours (in UTC) - Instances will auto-shutdown outside these hours:${NC}"
-read -p "Start Time (HH:MM) [17:00]: " BUSINESS_START
-BUSINESS_START=${BUSINESS_START:-17:00}
-
-read -p "End Time (HH:MM) [06:00]: " BUSINESS_END
-BUSINESS_END=${BUSINESS_END:-06:00}
+echo -e "${GREEN}Start Time: $BUSINESS_START${NC}"
+echo -e "${GREEN}End Time: $BUSINESS_END${NC}"
+echo -e "${BLUE}(Use --business-start and --business-end to override)${NC}"
 
 # Get the latest Amazon Linux 2 AMI ID for the region
 echo ""
