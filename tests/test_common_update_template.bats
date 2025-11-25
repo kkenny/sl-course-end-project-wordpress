@@ -2,9 +2,6 @@
 
 # Test suite for update_template_ami function with actual file operations
 
-load 'test_helper/bats-support/load'
-load 'test_helper/bats-assert/load'
-
 setup() {
     TEST_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
     PROJECT_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
@@ -41,12 +38,12 @@ teardown() {
     local new_ami="ami-1234567890abcdef0"
     
     run update_template_ami "$TEST_TEMPLATE" "$new_ami"
-    assert_success
+    [ "$status" -eq 0 ]
     
     # Check that the AMI was updated
-    run grep -q "$new_ami" "$TEST_TEMPLATE"
-    assert_success
-    refute_output --partial "ami-09887f71d98a72a5c"
+    grep -q "$new_ami" "$TEST_TEMPLATE"
+    [ $? -eq 0 ]
+    ! grep -q "ami-09887f71d98a72a5c" "$TEST_TEMPLATE"
 }
 
 @test "update_template_ami handles multiple AMI references" {
@@ -64,10 +61,10 @@ EOF
     local new_ami="ami-1234567890abcdef0"
     
     run update_template_ami "$TEST_TEMPLATE" "$new_ami"
-    assert_success
+    [ "$status" -eq 0 ]
     
     # Count occurrences of new AMI (should be 2)
     count=$(grep -o "$new_ami" "$TEST_TEMPLATE" | wc -l | tr -d ' ')
-    assert [ "$count" -eq 2 ]
+    [ "$count" -eq 2 ]
 }
 
