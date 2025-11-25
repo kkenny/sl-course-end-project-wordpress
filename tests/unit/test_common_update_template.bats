@@ -4,7 +4,7 @@
 
 setup() {
     TEST_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
-    PROJECT_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
+    PROJECT_ROOT="$(cd "${TEST_DIR}/../.." && pwd)"
     
     # Create a temporary test template file
     TEST_TEMPLATE="${BATS_TMPDIR}/test-template.yaml"

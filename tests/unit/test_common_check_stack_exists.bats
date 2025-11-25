@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
-# Test suite for get_stack_status function with AWS CLI mocking
+# Test suite for check_stack_exists function with AWS CLI mocking
 
 setup() {
     TEST_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
-    PROJECT_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
+    PROJECT_ROOT="$(cd "${TEST_DIR}/../.." && pwd)"
     
     export COMMON_DIR="$PROJECT_ROOT"
     export SCRIPT_DIR="$PROJECT_ROOT"
@@ -33,42 +33,24 @@ teardown() {
     export PATH="${PATH#${MOCK_AWS_DIR}:}"
 }
 
-@test "get_stack_status returns CREATE_COMPLETE status" {
-    # Create a mock aws script that returns CREATE_COMPLETE
+@test "check_stack_exists returns success when stack exists" {
+    # Create a mock aws script that returns valid stack data
     cat > "${MOCK_AWS_DIR}/aws" <<'EOF'
 #!/bin/bash
 if [ "$1" = "cloudformation" ] && [ "$2" = "describe-stacks" ] && [ "$3" = "--stack-name" ] && [ "$4" = "test-stack" ]; then
-    echo "CREATE_COMPLETE"
+    echo '{"Stacks":[{"StackName":"test-stack"}]}'
     exit 0
 fi
 exec /usr/bin/aws "$@"
 EOF
     chmod +x "${MOCK_AWS_DIR}/aws"
     
-    run get_stack_status "test-stack" "us-east-1"
+    run check_stack_exists "test-stack" "us-east-1"
     [ "$status" -eq 0 ]
-    [ "$output" = "CREATE_COMPLETE" ]
 }
 
-@test "get_stack_status returns UPDATE_IN_PROGRESS status" {
-    # Create a mock aws script that returns UPDATE_IN_PROGRESS
-    cat > "${MOCK_AWS_DIR}/aws" <<'EOF'
-#!/bin/bash
-if [ "$1" = "cloudformation" ] && [ "$2" = "describe-stacks" ] && [ "$3" = "--stack-name" ] && [ "$4" = "test-stack" ]; then
-    echo "UPDATE_IN_PROGRESS"
-    exit 0
-fi
-exec /usr/bin/aws "$@"
-EOF
-    chmod +x "${MOCK_AWS_DIR}/aws"
-    
-    run get_stack_status "test-stack" "us-east-1"
-    [ "$status" -eq 0 ]
-    [ "$output" = "UPDATE_IN_PROGRESS" ]
-}
-
-@test "get_stack_status returns empty when stack does not exist" {
-    # Create a mock aws script that fails (stack not found)
+@test "check_stack_exists returns error when stack does not exist" {
+    # Create a mock aws script that returns error (stack not found)
     cat > "${MOCK_AWS_DIR}/aws" <<'EOF'
 #!/bin/bash
 if [ "$1" = "cloudformation" ] && [ "$2" = "describe-stacks" ] && [ "$3" = "--stack-name" ] && [ "$4" = "nonexistent-stack" ]; then
@@ -78,46 +60,43 @@ exec /usr/bin/aws "$@"
 EOF
     chmod +x "${MOCK_AWS_DIR}/aws"
     
-    run get_stack_status "nonexistent-stack" "us-east-1"
-    [ "$status" -eq 0 ]  # Function returns 0 but outputs empty string
-    [ -z "$output" ]
+    run check_stack_exists "nonexistent-stack" "us-east-1"
+    [ "$status" -ne 0 ]
 }
 
-@test "get_stack_status uses default region when not specified" {
+@test "check_stack_exists uses default region when not specified" {
     # Create a mock aws script that checks for default region
     cat > "${MOCK_AWS_DIR}/aws" <<'EOF'
 #!/bin/bash
 if [ "$1" = "cloudformation" ] && [ "$2" = "describe-stacks" ] && [ "$3" = "--stack-name" ] && [ "$4" = "test-stack" ] && [ "$5" = "--region" ] && [ "$6" = "us-east-1" ]; then
-    echo "CREATE_COMPLETE"
+    echo '{"Stacks":[{"StackName":"test-stack"}]}'
     exit 0
 fi
 exec /usr/bin/aws "$@"
 EOF
     chmod +x "${MOCK_AWS_DIR}/aws"
     
-    run get_stack_status "test-stack"
+    run check_stack_exists "test-stack"
     [ "$status" -eq 0 ]
-    [ "$output" = "CREATE_COMPLETE" ]
 }
 
-@test "get_stack_status handles custom region" {
+@test "check_stack_exists handles custom region" {
     # Create a mock aws script that checks for custom region
     cat > "${MOCK_AWS_DIR}/aws" <<'EOF'
 #!/bin/bash
 if [ "$1" = "cloudformation" ] && [ "$2" = "describe-stacks" ] && [ "$3" = "--stack-name" ] && [ "$4" = "test-stack" ] && [ "$5" = "--region" ] && [ "$6" = "us-west-2" ]; then
-    echo "UPDATE_COMPLETE"
+    echo '{"Stacks":[{"StackName":"test-stack"}]}'
     exit 0
 fi
 exec /usr/bin/aws "$@"
 EOF
     chmod +x "${MOCK_AWS_DIR}/aws"
     
-    run get_stack_status "test-stack" "us-west-2"
+    run check_stack_exists "test-stack" "us-west-2"
     [ "$status" -eq 0 ]
-    [ "$output" = "UPDATE_COMPLETE" ]
 }
 
-@test "get_stack_status handles AWS CLI failure gracefully" {
+@test "check_stack_exists handles AWS CLI failure" {
     # Create a mock aws script that always fails
     cat > "${MOCK_AWS_DIR}/aws" <<'EOF'
 #!/bin/bash
@@ -128,8 +107,7 @@ exec /usr/bin/aws "$@"
 EOF
     chmod +x "${MOCK_AWS_DIR}/aws"
     
-    run get_stack_status "test-stack" "us-east-1"
-    [ "$status" -eq 0 ]  # Function returns 0 but outputs empty string
-    [ -z "$output" ]
+    run check_stack_exists "test-stack" "us-east-1"
+    [ "$status" -ne 0 ]
 }
 

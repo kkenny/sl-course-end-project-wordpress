@@ -30,32 +30,33 @@ Run all tests:
 Run specific test files:
 
 ```bash
-./run-tests.sh tests/test_common.bats
-./run-tests.sh tests/test_common.bats tests/test_common_update_template.bats
+./run-tests.sh tests/unit/test_common.bats
+./run-tests.sh tests/unit/test_common.bats tests/unit/test_common_update_template.bats
 ```
 
 Or use bats directly:
 
 ```bash
-./test_helper/bats-core/bin/bats tests/
+./test_helper/bats-core/bin/bats tests/unit/
 ```
 
 ## Test Structure
 
-Tests are located in the `tests/` directory:
+Tests are located in the `tests/unit/` directory:
 
 ```
 tests/
-├── test_common.bats                          # Tests for _common.sh functions
-├── test_common_update_template.bats           # Tests for template update functions
-├── test_common_get_latest_ami.bats           # Tests for get_latest_ami() with AWS mocking
-├── test_common_get_aws_account.bats           # Tests for get_aws_account() success/failure
-├── test_common_validate_key_pair.bats        # Enhanced tests for validate_key_pair()
-├── test_common_auto_select_key_pair.bats     # Tests for auto_select_key_pair() function
-├── test_common_check_stack_exists.bats        # Tests for check_stack_exists() with AWS mocking
-├── test_common_get_stack_status.bats          # Tests for get_stack_status() with AWS mocking
-├── test_common_check_aws_credentials.bats    # Tests for check_aws_credentials() with AWS mocking
-└── test_script_args.bats                     # Tests for script argument parsing
+└── unit/
+    ├── test_common.bats                          # Tests for _common.sh functions
+    ├── test_common_update_template.bats           # Tests for template update functions
+    ├── test_common_get_latest_ami.bats           # Tests for get_latest_ami() with AWS mocking
+    ├── test_common_get_aws_account.bats           # Tests for get_aws_account() success/failure
+    ├── test_common_validate_key_pair.bats        # Enhanced tests for validate_key_pair()
+    ├── test_common_auto_select_key_pair.bats     # Tests for auto_select_key_pair() function
+    ├── test_common_check_stack_exists.bats        # Tests for check_stack_exists() with AWS mocking
+    ├── test_common_get_stack_status.bats          # Tests for get_stack_status() with AWS mocking
+    ├── test_common_check_aws_credentials.bats    # Tests for check_aws_credentials() with AWS mocking
+    └── test_script_args.bats                     # Tests for script argument parsing
 ```
 
 ## Writing Tests
@@ -201,16 +202,16 @@ You can run specific categories of tests:
 
 ```bash
 # Run only core function tests
-./run-tests.sh tests/test_common*.bats
+./run-tests.sh tests/unit/test_common*.bats
 
 # Run only argument parsing tests
-./run-tests.sh tests/test_script_args.bats
+./run-tests.sh tests/unit/test_script_args.bats
 
 # Run tests for a specific function
-./run-tests.sh tests/test_common_get_latest_ami.bats
+./run-tests.sh tests/unit/test_common_get_latest_ami.bats
 
 # Run tests for AWS credential functions
-./run-tests.sh tests/test_common_check_aws_credentials.bats tests/test_common_get_aws_account.bats
+./run-tests.sh tests/unit/test_common_check_aws_credentials.bats tests/unit/test_common_get_aws_account.bats
 ```
 
 ## Continuous Integration

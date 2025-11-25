@@ -36,7 +36,7 @@ fi
 # Determine which tests to run
 if [ $# -eq 0 ]; then
     # Run all tests
-    TEST_FILES="${SCRIPT_DIR}/tests/*.bats"
+    TEST_FILES="${SCRIPT_DIR}/tests/unit/*.bats"
 else
     # Run specific test files
     TEST_FILES="$@"

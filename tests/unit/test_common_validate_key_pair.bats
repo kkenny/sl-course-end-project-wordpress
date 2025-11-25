@@ -4,7 +4,7 @@
 
 setup() {
     TEST_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
-    PROJECT_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
+    PROJECT_ROOT="$(cd "${TEST_DIR}/../.." && pwd)"
     
     export COMMON_DIR="$PROJECT_ROOT"
     export SCRIPT_DIR="$PROJECT_ROOT"

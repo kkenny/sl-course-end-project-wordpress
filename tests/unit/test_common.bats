@@ -6,7 +6,7 @@
 setup() {
     # Get the directory where this test file is located
     TEST_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
-    PROJECT_ROOT="$(cd "${TEST_DIR}/.." && pwd)"
+    PROJECT_ROOT="$(cd "${TEST_DIR}/../.." && pwd)"
     
     # Source _common.sh but skip sourcing _set_profile.sh if it exists
     # We'll mock AWS commands anyway
