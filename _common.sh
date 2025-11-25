@@ -89,3 +89,178 @@ validate_key_pair() {
     fi
 }
 
+# Function to check AWS credentials
+check_aws_credentials() {
+    if ! aws sts get-caller-identity &> /dev/null; then
+        echo -e "${RED}Error: AWS credentials not configured. Please run 'aws configure'${NC}" >&2
+        return 1
+    fi
+    return 0
+}
+
+# Function to get and display AWS account
+get_aws_account() {
+    local aws_account
+    aws_account=$(aws sts get-caller-identity --query Account --output text 2>/dev/null)
+    if [ -n "$aws_account" ]; then
+        echo -e "${GREEN}AWS Account: $aws_account${NC}"
+        return 0
+    else
+        echo -e "${RED}Error: Could not retrieve AWS account${NC}" >&2
+        return 1
+    fi
+}
+
+# Function to check if a CloudFormation stack exists
+check_stack_exists() {
+    local stack_name="$1"
+    local region="${2:-us-east-1}"
+    
+    if [ -z "$stack_name" ]; then
+        echo -e "${RED}Error: Stack name is required${NC}" >&2
+        return 1
+    fi
+    
+    local stack_exists
+    stack_exists=$(aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$region" \
+        2>/dev/null || echo "")
+    
+    if [ -z "$stack_exists" ]; then
+        return 1
+    else
+        return 0
+    fi
+}
+
+# Function to get CloudFormation stack status
+get_stack_status() {
+    local stack_name="$1"
+    local region="${2:-us-east-1}"
+    
+    if [ -z "$stack_name" ]; then
+        echo -e "${RED}Error: Stack name is required${NC}" >&2
+        return 1
+    fi
+    
+    aws cloudformation describe-stacks \
+        --stack-name "$stack_name" \
+        --region "$region" \
+        --query "Stacks[0].StackStatus" \
+        --output text 2>/dev/null || echo ""
+}
+
+# Function to get latest Amazon Linux 2 AMI for a region
+get_latest_ami() {
+    local region="${1:-us-east-1}"
+    local default_ami="${2:-ami-0c55b159cbfafe1f0}"
+    
+    local ami_id
+    ami_id=$(aws ec2 describe-images \
+        --owners amazon \
+        --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" \
+                  "Name=state,Values=available" \
+        --query "Images | sort_by(@, &CreationDate) | [-1].ImageId" \
+        --output text \
+        --region "$region" 2>/dev/null)
+    
+    if [ -z "$ami_id" ] || [ "$ami_id" == "None" ]; then
+        echo -e "${YELLOW}Warning: Could not find Amazon Linux 2 AMI. Using default: $default_ami${NC}" >&2
+        echo "$default_ami"
+    else
+        echo "$ami_id"
+    fi
+}
+
+# Function to update AMI ID in CloudFormation template
+update_template_ami() {
+    local template_file="$1"
+    local ami_id="$2"
+    
+    if [ -z "$template_file" ] || [ -z "$ami_id" ]; then
+        echo -e "${RED}Error: Template file and AMI ID are required${NC}" >&2
+        return 1
+    fi
+    
+    if [ ! -f "$template_file" ]; then
+        echo -e "${RED}Error: Template file '$template_file' not found${NC}" >&2
+        return 1
+    fi
+    
+    # Replace any AMI ID pattern in the template
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        sed -i '' "s/ami-[0-9a-f]\{17\}/$ami_id/g" "$template_file"
+    else
+        # Linux
+        sed -i "s/ami-[0-9a-f]\{17\}/$ami_id/g" "$template_file"
+    fi
+}
+
+# Function to auto-select or prompt for key pair
+auto_select_key_pair() {
+    local region="${1:-us-east-1}"
+    local key_pair_name=""
+    
+    # Get list of key pairs
+    local key_pairs
+    key_pairs=$(aws ec2 describe-key-pairs --region "$region" --query 'KeyPairs[*].KeyName' --output text 2>/dev/null || echo "")
+    
+    if [ -z "$key_pairs" ]; then
+        echo -e "${RED}Error: No Key Pairs found in region '$region'${NC}" >&2
+        echo -e "${YELLOW}Please create a Key Pair first using:${NC}" >&2
+        echo "  ./create-key-pair.sh -k <key-name> -r $region" >&2
+        return 1
+    fi
+    
+    # Count key pairs
+    local key_pair_count
+    key_pair_count=$(echo "$key_pairs" | wc -w | tr -d ' ')
+    
+    if [ "$key_pair_count" -eq 1 ]; then
+        # Only one key pair - use it automatically
+        key_pair_name="$key_pairs"
+        echo -e "${GREEN}Found one Key Pair: $key_pair_name${NC}" >&2
+        echo -e "${GREEN}Using Key Pair: $key_pair_name${NC}" >&2
+    else
+        # Multiple key pairs - present options
+        echo -e "${BLUE}Available Key Pairs:${NC}" >&2
+        echo "" >&2
+        local index=1
+        local key_pair_array=()
+        for key in $key_pairs; do
+            echo "  $index) $key" >&2
+            key_pair_array+=("$key")
+            ((index++))
+        done
+        echo "" >&2
+        
+        while true; do
+            read -p "Select Key Pair (1-$key_pair_count) or enter name: " selection
+            
+            # Check if it's a number
+            if [[ "$selection" =~ ^[0-9]+$ ]]; then
+                if [ "$selection" -ge 1 ] && [ "$selection" -le "$key_pair_count" ]; then
+                    key_pair_name="${key_pair_array[$((selection-1))]}"
+                    echo -e "${GREEN}Selected Key Pair: $key_pair_name${NC}" >&2
+                    break
+                else
+                    echo -e "${RED}Invalid selection. Please enter a number between 1 and $key_pair_count${NC}" >&2
+                fi
+            else
+                # User entered a name directly - validate it exists
+                if echo "$key_pairs" | grep -q "^$selection$"; then
+                    key_pair_name="$selection"
+                    echo -e "${GREEN}Selected Key Pair: $key_pair_name${NC}" >&2
+                    break
+                else
+                    echo -e "${RED}Key Pair '$selection' not found. Please try again.${NC}" >&2
+                fi
+            fi
+        done
+    fi
+    
+    echo "$key_pair_name"
+}
+

@@ -120,13 +120,11 @@ fi
 
 # Check AWS credentials
 echo -e "${YELLOW}Checking AWS credentials...${NC}"
-if ! aws sts get-caller-identity &> /dev/null; then
-    echo -e "${RED}Error: AWS credentials not configured. Please run 'aws configure'${NC}"
+if ! check_aws_credentials; then
     exit 1
 fi
 
-AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-echo -e "${GREEN}AWS Account: $AWS_ACCOUNT${NC}"
+get_aws_account
 echo -e "${GREEN}Region: $REGION${NC}"
 
 # Get required parameters
@@ -136,58 +134,9 @@ echo -e "${YELLOW}Please provide the following information:${NC}"
 # Key Pair
 if [ -z "$KEY_PAIR_NAME" ]; then
     echo -e "${BLUE}Checking available Key Pairs in region '$REGION'...${NC}"
-    
-    # Get list of key pairs
-    KEY_PAIRS=$(aws ec2 describe-key-pairs --region "$REGION" --query 'KeyPairs[*].KeyName' --output text 2>/dev/null || echo "")
-    
-    if [ -z "$KEY_PAIRS" ]; then
-        echo -e "${RED}Error: No Key Pairs found in region '$REGION'${NC}"
-        echo -e "${YELLOW}Please create a Key Pair first using:${NC}"
-        echo "  ./create-key-pair.sh -k <key-name> -r $REGION"
+    KEY_PAIR_NAME=$(auto_select_key_pair "$REGION")
+    if [ $? -ne 0 ] || [ -z "$KEY_PAIR_NAME" ]; then
         exit 1
-    fi
-    
-    # Count key pairs (handle case where there's only one)
-    KEY_PAIR_COUNT=$(echo "$KEY_PAIRS" | wc -w | tr -d ' ')
-    
-    if [ "$KEY_PAIR_COUNT" -eq 1 ]; then
-        # Only one key pair - use it automatically
-        KEY_PAIR_NAME="$KEY_PAIRS"
-        echo -e "${GREEN}Found one Key Pair: $KEY_PAIR_NAME${NC}"
-        echo -e "${GREEN}Using Key Pair: $KEY_PAIR_NAME${NC}"
-    else
-        # Multiple key pairs - present options
-        echo -e "${BLUE}Available Key Pairs:${NC}"
-        echo ""
-        KEY_PAIR_ARRAY=($KEY_PAIRS)
-        for i in "${!KEY_PAIR_ARRAY[@]}"; do
-            echo "  $((i+1)). ${KEY_PAIR_ARRAY[$i]}"
-        done
-        echo ""
-        
-        while true; do
-            read -p "Select Key Pair (1-$KEY_PAIR_COUNT) or enter name: " SELECTION
-            
-            # Check if it's a number
-            if [[ "$SELECTION" =~ ^[0-9]+$ ]]; then
-                if [ "$SELECTION" -ge 1 ] && [ "$SELECTION" -le "$KEY_PAIR_COUNT" ]; then
-                    KEY_PAIR_NAME="${KEY_PAIR_ARRAY[$((SELECTION-1))]}"
-                    echo -e "${GREEN}Selected Key Pair: $KEY_PAIR_NAME${NC}"
-                    break
-                else
-                    echo -e "${RED}Invalid selection. Please enter a number between 1 and $KEY_PAIR_COUNT${NC}"
-                fi
-            else
-                # User entered a name directly - validate it exists
-                if echo "$KEY_PAIRS" | grep -q "^$SELECTION$"; then
-                    KEY_PAIR_NAME="$SELECTION"
-                    echo -e "${GREEN}Selected Key Pair: $KEY_PAIR_NAME${NC}"
-                    break
-                else
-                    echo -e "${RED}Key Pair '$SELECTION' not found. Please try again.${NC}"
-                fi
-            fi
-        done
     fi
 else
     echo -e "${GREEN}EC2 Key Pair Name: $KEY_PAIR_NAME (from command line)${NC}"
@@ -281,42 +230,23 @@ if [ -n "$AMI_ID" ]; then
 else
     # Query AWS for latest Amazon Linux 2 AMI
     echo -e "${YELLOW}Finding latest Amazon Linux 2 AMI...${NC}"
-    AMI_ID=$(aws ec2 describe-images \
-        --owners amazon \
-        --filters "Name=name,Values=amzn2-ami-hvm-*-x86_64-gp2" \
-                  "Name=state,Values=available" \
-        --query "Images | sort_by(@, &CreationDate) | [-1].ImageId" \
-        --output text \
-        --region "$REGION")
-    
-    if [ -z "$AMI_ID" ] || [ "$AMI_ID" == "None" ]; then
-        echo -e "${YELLOW}Warning: Could not find Amazon Linux 2 AMI. Using default.${NC}"
-        echo -e "${YELLOW}You may need to update the ImageId in the template manually.${NC}"
-        AMI_ID="ami-0c55b159cbfafe1f0"  # Default (may need region-specific update)
-    else
+    AMI_ID=$(get_latest_ami "$REGION")
+    if [ -n "$AMI_ID" ]; then
         echo -e "${GREEN}Found AMI: $AMI_ID${NC}"
     fi
 fi
 
 # Update template with AMI ID
 echo -e "${YELLOW}Updating template with region-specific AMI ID...${NC}"
-# Find any AMI ID pattern in the template and replace it
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS - replace any ami-xxxxxxxxxxxxxxxxx pattern
-    sed -i '' "s/ami-[0-9a-f]\{17\}/$AMI_ID/g" "$TEMPLATE_FILE"
+if update_template_ami "$TEMPLATE_FILE" "$AMI_ID"; then
+    echo -e "${GREEN}Template updated with AMI: $AMI_ID${NC}"
 else
-    # Linux - replace any ami-xxxxxxxxxxxxxxxxx pattern
-    sed -i "s/ami-[0-9a-f]\{17\}/$AMI_ID/g" "$TEMPLATE_FILE"
+    echo -e "${RED}Failed to update template with AMI ID${NC}"
+    exit 1
 fi
-echo -e "${GREEN}Template updated with AMI: $AMI_ID${NC}"
 
 # Check if stack exists
-STACK_EXISTS=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --region "$REGION" \
-    2>/dev/null || echo "")
-
-if [ -n "$STACK_EXISTS" ]; then
+if check_stack_exists "$STACK_NAME" "$REGION"; then
     echo ""
     echo -e "${YELLOW}Stack '$STACK_NAME' already exists. Updating...${NC}"
     OPERATION="update"

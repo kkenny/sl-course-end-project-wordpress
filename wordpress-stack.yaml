@@ -229,529 +229,65 @@ Resources:
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
-            # Redirect all output to log file for debugging
-            exec > >(tee -a /var/log/wordpress-install.log)
-            exec 2>&1
-            
-            echo "=========================================="
-            echo "WordPress Configuration Script Started"
-            echo "Timestamp: $(date)"
-            echo "=========================================="
-            
-            # Don't exit on error - log and continue
+            exec >>/var/log/wordpress-install.log 2>&1
             set +e
-            
-            # Get region and determine environment
-            REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-            echo "Instance region: $REGION"
-            
-            # Get stack name and environment to determine if this is production
-            INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
+            R=$$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+            I=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
             sleep 5
-            STACK_NAME_TAG=$(aws ec2 describe-instances \
-                --instance-ids "$INSTANCE_ID" \
-                --region $REGION \
-                --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
-                --output text 2>/dev/null || echo "")
-            
-            # Determine environment
-            IS_PRODUCTION=0
-            if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ]; then
-                # Try to get Environment parameter from stack
-                ENV_PARAM=$(aws cloudformation describe-stacks \
-                    --stack-name "$STACK_NAME_TAG" \
-                    --region $REGION \
-                    --query 'Stacks[0].Parameters[?ParameterKey==`Environment`].ParameterValue' \
-                    --output text 2>/dev/null || echo "")
-                
-                if [ "$ENV_PARAM" == "Production" ]; then
-                    IS_PRODUCTION=1
-                    echo "Environment: Production (using AMI with pre-installed WordPress)"
-                elif [[ "$STACK_NAME_TAG" == *"prod"* ]] || [[ "$STACK_NAME_TAG" == *"Prod"* ]] || [[ "$STACK_NAME_TAG" == *"PROD"* ]]; then
-                    IS_PRODUCTION=1
-                    echo "Environment: Production (detected from stack name)"
-                else
-                    echo "Environment: Development (fresh installation)"
-                fi
-            else
-                echo "Could not determine environment from stack, assuming Development"
-            fi
-            
-            # Only install packages for Development environment
-            if [ $IS_PRODUCTION -eq 0 ]; then
-              echo "Performing fresh installation for Development environment..."
+            S=$$(aws ec2 describe-instances --instance-ids "$$I" --region $$R --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' --output text 2>/dev/null || echo "")
+            PR=0
+            [ -n "$$S" ] && [ "$$S" != "None" ] && E=$$(aws cloudformation describe-stacks --stack-name "$$S" --region $$R --query 'Stacks[0].Parameters[?ParameterKey==`Environment`].ParameterValue' --output text 2>/dev/null || echo "") && ([ "$$E" == "Production" ] || [[ "$$S" == *"prod"* ]] || [[ "$$S" == *"Prod"* ]] || [[ "$$S" == *"PROD"* ]]) && PR=1
+            if [ $$PR -eq 0 ]; then
               yum update -y
-              
-              # Install PHP 8.0+ (required for WordPress 6.8.0+)
-              # Try Amazon Linux Extras first, then fall back to Remi repository
-              if amazon-linux-extras list | grep -q php8.2; then
-                echo "Installing PHP 8.2 via Amazon Linux Extras..."
-                amazon-linux-extras install php8.2 -y
-                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-              elif amazon-linux-extras list | grep -q php8.1; then
-                echo "Installing PHP 8.1 via Amazon Linux Extras..."
-                amazon-linux-extras install php8.1 -y
-                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-              elif amazon-linux-extras list | grep -q php8.0; then
-                echo "Installing PHP 8.0 via Amazon Linux Extras..."
-                amazon-linux-extras install php8.0 -y
-                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-              else
-                echo "Installing PHP 8.0+ from Remi repository..."
-                yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-                yum install -y https://rpms.remirepo.net/enterprise/remi-release-7.rpm
-                yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80
-                yum install -y httpd php php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip
-              fi
-              
-              systemctl start httpd
-              systemctl enable httpd
-              
-              # Verify PHP version (must be 8.0 or higher)
-              echo "Checking PHP version..."
-              PHP_VERSION=$(php -r "echo PHP_VERSION;" | cut -d. -f1,2)
-              PHP_FULL_VERSION=$(php -v | head -1)
-              echo "Installed PHP version: $PHP_FULL_VERSION"
-              echo "PHP major.minor: $PHP_VERSION"
-              
-              # Check PHP version without bc (bc might not be installed)
-              PHP_MAJOR=$(echo $PHP_VERSION | cut -d. -f1)
-              PHP_MINOR=$(echo $PHP_VERSION | cut -d. -f2)
-              if [ "$PHP_MAJOR" -lt 8 ]; then
-                echo "ERROR: PHP 8.0+ required, but found PHP $PHP_VERSION"
-                echo "WordPress 6.8.0+ requires PHP 8.0 or higher"
-              else
-                echo "PHP version check passed: $PHP_VERSION"
-              fi
-              
-              # Download and extract WordPress
-              echo "Downloading WordPress..."
-              cd /var/www/html
-              wget -q https://wordpress.org/latest.tar.gz
-              if [ $? -ne 0 ]; then
-                echo "ERROR: Failed to download WordPress"
-                exit 1
-              fi
-              
-              echo "Extracting WordPress..."
-              tar -xzf latest.tar.gz
-              if [ $? -ne 0 ]; then
-                echo "ERROR: Failed to extract WordPress"
-                exit 1
-              fi
-              
-              echo "Moving WordPress files..."
-              mv wordpress/* .
-              rm -rf wordpress latest.tar.gz
-              echo "WordPress files extracted successfully"
+              amazon-linux-extras list | grep -q php8.2 && amazon-linux-extras install php8.2 -y || amazon-linux-extras list | grep -q php8.1 && amazon-linux-extras install php8.1 -y || amazon-linux-extras list | grep -q php8.0 && amazon-linux-extras install php8.0 -y || (yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm https://rpms.remirepo.net/enterprise/remi-release-7.rpm && (yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80))
+              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip && systemctl start httpd && systemctl enable httpd
+              cd /var/www/html && wget -q https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && mv wordpress/* . && rm -rf wordpress latest.tar.gz
             else
-              echo "Production environment detected - skipping package installation and WordPress download"
-              echo "Assuming WordPress is already installed from AMI"
               cd /var/www/html
             fi
-            
-            # Wait for database to be ready
-            # Get database endpoint using AWS CLI (avoids CloudFormation !GetAtt substitution issues)
-            echo "Getting database endpoint from AWS RDS..."
-            
-            # Determine DB identifier from environment (reuse ENV_PARAM if available, otherwise detect)
-            DB_IDENTIFIER="wordpress-db"
-            if [ -n "$ENV_PARAM" ] && [ "$ENV_PARAM" != "None" ]; then
-                DB_IDENTIFIER="${ENV_PARAM}-wordpress-db"
-                echo "Using environment-specific DB identifier: $DB_IDENTIFIER"
-            elif [ $IS_PRODUCTION -eq 1 ]; then
-                DB_IDENTIFIER="Production-wordpress-db"
-                echo "Using production DB identifier: $DB_IDENTIFIER"
-            elif [[ "$STACK_NAME_TAG" == *"dev"* ]] || [[ "$STACK_NAME_TAG" == *"Dev"* ]] || [[ "$STACK_NAME_TAG" == *"DEV"* ]]; then
-                DB_IDENTIFIER="Development-wordpress-db"
-                echo "Using development DB identifier: $DB_IDENTIFIER"
-            else
-                echo "Could not determine environment, using default DB identifier: $DB_IDENTIFIER"
+            D="wordpress-db"
+            if [ $$PR -eq 1 ]; then
+              D="Production-wordpress-db"
+            elif [[ "$$S" == *"dev"* ]] || [[ "$$S" == *"Dev"* ]] || [[ "$$S" == *"DEV"* ]]; then
+              D="Development-wordpress-db"
             fi
-            
-            # Wait for database to be available and get endpoint
-            DB_HOST=""
-            echo "Waiting for database endpoint to be available..."
-            for i in {1..30}; do
-              # Query RDS and filter out "None" responses
-              DB_HOST_RAW=$(aws rds describe-db-instances --db-instance-identifier "$DB_IDENTIFIER" --query 'DBInstances[0].Endpoint.Address' --output text --region $REGION 2>&1)
-              
-              # Check if query was successful and result is valid
-              if [ $? -eq 0 ] && [ -n "$DB_HOST_RAW" ] && [ "$DB_HOST_RAW" != "None" ] && [ "$DB_HOST_RAW" != "null" ]; then
-                DB_HOST="$DB_HOST_RAW"
-                echo "Database endpoint found: $DB_HOST"
-                break
-              else
-                echo "Attempt $i/30: Database endpoint not yet available... (response: $DB_HOST_RAW)"
-                sleep 10
-              fi
-            done
-            
-            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ] || [ "$DB_HOST" == "null" ]; then
-              echo "ERROR: Could not retrieve database endpoint after 5 minutes"
-              echo "This may indicate:"
-              echo "  1. Database is still initializing (can take 5-10 minutes)"
-              echo "  2. IAM role lacks RDS permissions"
-              echo "  3. Database identifier mismatch"
-              echo "The script will exit to prevent incorrect configuration."
-              exit 1
-            else
-              echo "Database endpoint confirmed: $DB_HOST"
-            fi
-            
-            DB_NAME="wordpress"
-            DB_USER="wordpress"
-            DB_PASS="${WordPressAdminPassword}"
-            
-            # Debug: Check if password was set (without showing the actual password)
-            if [ -z "$DB_PASS" ]; then
-              echo "ERROR: DB_PASS is empty! CloudFormation substitution may have failed."
-              echo "The password parameter may not have been passed correctly to UserData."
-              echo "This is a critical error - cannot proceed without database password."
-              exit 1
-            else
-              # Use bash variable length syntax - escape $ for CloudFormation !Sub
-              DB_PASS_LEN=$(echo -n "$DB_PASS" | wc -c)
-              echo "DB_PASS is set (length: $DB_PASS_LEN characters)"
-              # Validate password has reasonable length (should be at least 8 characters)
-              if [ $DB_PASS_LEN -lt 8 ]; then
-                echo "WARNING: Password length is less than 8 characters. This may cause issues."
-              fi
-            fi
-            
-            # Only proceed if we have a valid database host
-            if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "None" ]; then
-              echo "ERROR: Database host is not available. Cannot configure WordPress."
-              echo "The database may still be initializing. Please wait and retry configuration later."
-              exit 1
-            fi
-            
-            # Wait for database to be available (max 5 minutes)
-            echo "Waiting for database to be ready..."
-            echo "Database host: $DB_HOST"
-            echo "Database name: $DB_NAME"
-            echo "Database user: $DB_USER"
-            
-            DB_READY=0
-            for i in {1..60}; do
-              if mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" -e "SELECT 1" 2>/dev/null; then
-                echo "Database is ready!"
-                DB_READY=1
-                break
-              fi
-              echo "Waiting for database... ($i/60)"
-              sleep 5
-            done
-            
-            if [ $DB_READY -eq 0 ]; then
-              echo "ERROR: Database not ready after 5 minutes"
-              echo "Attempting to continue anyway..."
-            fi
-            
-            # Configure WordPress
-            echo "Configuring WordPress..."
-            echo "Current directory: $(pwd)"
-            echo "Files in /var/www/html:"
-            ls -la /var/www/html/ | head -20
-            
-            # For production, wp-config.php should already exist from AMI
-            # For development, create from sample
-            if [ $IS_PRODUCTION -eq 1 ]; then
-              if [ -f wp-config.php ]; then
-                echo "Production: Found existing wp-config.php, updating database configuration..."
-              else
-                echo "WARNING: Production environment but wp-config.php not found!"
-                if [ -f wp-config-sample.php ]; then
-                  echo "Creating wp-config.php from sample..."
-                  cp wp-config-sample.php wp-config.php
-                else
-                  echo "ERROR: Neither wp-config.php nor wp-config-sample.php found!"
-                  exit 1
-                fi
-              fi
-            else
-              if [ -f wp-config-sample.php ]; then
-                echo "Development: Found wp-config-sample.php, creating wp-config.php..."
-                cp wp-config-sample.php wp-config.php
-              else
-                echo "ERROR: wp-config-sample.php not found!"
-                exit 1
-              fi
-            fi
-            
-            if [ -f wp-config.php ]; then
-              
-              echo "Updating database configuration..."
-              echo "DB_NAME: $DB_NAME"
-              echo "DB_USER: $DB_USER"
-              echo "DB_HOST: $DB_HOST"
-              DB_PASS_LEN=$(echo -n "$DB_PASS" | wc -c)
-              echo "DB_PASS length: $DB_PASS_LEN"
-              
-              # Use # as delimiter for sed to avoid conflicts with special characters
-              # For sed replacement strings, we need to escape: & (whole match) and \ (backslash)
-              # Escape backslashes first, then ampersands, then the delimiter itself
-              DB_PASS_ESCAPED=$(printf '%s\n' "$DB_PASS" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g' | sed 's/#/\\#/g')
-              
-              # Verify the password was escaped
-              if [ -z "$DB_PASS_ESCAPED" ]; then
-                echo "ERROR: Password escaping failed!"
-                exit 1
-              fi
-              
-              # Perform substitutions
-              sed -i "s#database_name_here#$DB_NAME#g" wp-config.php
-              sed -i "s#username_here#$DB_USER#g" wp-config.php
-              sed -i "s#password_here#$DB_PASS_ESCAPED#g" wp-config.php
-              sed -i "s#localhost#$DB_HOST#g" wp-config.php
-              
-              # Verify the substitutions worked
-              echo "Verifying wp-config.php substitutions..."
-              if grep -q "password_here" wp-config.php; then
-                echo "ERROR: Password substitution failed! 'password_here' still found in wp-config.php"
-                echo "Attempting alternative method..."
-                # Try using awk as a fallback
-                awk -v db_name="$DB_NAME" -v db_user="$DB_USER" -v db_pass="$DB_PASS" -v db_host="$DB_HOST" '
-                  /database_name_here/ { gsub(/database_name_here/, db_name) }
-                  /username_here/ { gsub(/username_here/, db_user) }
-                  /password_here/ { gsub(/password_here/, db_pass) }
-                  /localhost/ { gsub(/localhost/, db_host) }
-                  { print }
-                ' wp-config.php > wp-config.php.tmp && mv wp-config.php.tmp wp-config.php
-              fi
-              
-              if grep -q "localhost" wp-config.php && [ "$DB_HOST" != "localhost" ]; then
-                echo "WARNING: 'localhost' still found in wp-config.php, but DB_HOST is $DB_HOST"
-              fi
-              
-              # Get Load Balancer DNS and add WordPress URL configuration
-              echo "Getting Load Balancer DNS..."
-              
-              # Get stack name from instance tags
-              INSTANCE_ID=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-              echo "Instance ID: $INSTANCE_ID"
-              
-              # Wait a bit for tags to be available
-              sleep 5
-              
-              STACK_NAME_TAG=$(aws ec2 describe-instances \
-                --instance-ids "$INSTANCE_ID" \
-                --region $REGION \
-                --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' \
-                --output text 2>/dev/null || echo "")
-              
-              # Use if-else to avoid CloudFormation !Sub variable parsing issues
-              if [ -z "$STACK_NAME_TAG" ] || [ "$STACK_NAME_TAG" == "None" ]; then
-                echo "Stack name from tags: NOT_FOUND"
-              else
-                echo "Stack name from tags: $STACK_NAME_TAG"
-              fi
-              
-              LB_DNS=""
-              # Wait for Load Balancer to be available (retry up to 30 times = 5 minutes)
-              echo "Waiting for Load Balancer DNS to be available..."
-              for i in {1..30}; do
-                # Try to get Load Balancer DNS from CloudFormation stack outputs
-                if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ] && [ "$STACK_NAME_TAG" != "NOT_FOUND" ]; then
-                  LB_DNS=$(aws cloudformation describe-stacks \
-                    --stack-name "$STACK_NAME_TAG" \
-                    --region $REGION \
-                    --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
-                    --output text 2>/dev/null || echo "")
-                  
-                  if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
-                    echo "Load Balancer DNS found from stack outputs: $LB_DNS"
-                    break
-                  fi
-                fi
-                
-                # If we couldn't get it from stack outputs, try querying ELB directly by name pattern
-                if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
-                  # Query for Load Balancers with WP-LB in the name (matches our naming: ${Environment}-WP-LB)
-                  LB_ARN=$(aws elbv2 describe-load-balancers \
-                    --region $REGION \
-                    --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].LoadBalancerArn' \
-                    --output text 2>/dev/null | head -1 || echo "")
-                  
-                  if [ -n "$LB_ARN" ] && [ "$LB_ARN" != "None" ] && [ "$LB_ARN" != "null" ]; then
-                    LB_DNS=$(aws elbv2 describe-load-balancers \
-                      --load-balancer-arns "$LB_ARN" \
-                      --region $REGION \
-                      --query 'LoadBalancers[0].DNSName' \
-                      --output text 2>/dev/null || echo "")
-                    
-                    if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
-                      echo "Load Balancer DNS found from ELB query: $LB_DNS"
-                      break
-                    fi
-                  fi
-                fi
-                
-                if [ $i -lt 30 ]; then
-                  echo "Attempt $i/30: Load Balancer DNS not yet available (waiting 10 seconds)..."
-                  sleep 10
-                fi
-              done
-              
-              # If still not found, try one more time with a longer wait
-              if [ -z "$LB_DNS" ] || [ "$LB_DNS" == "None" ] || [ "$LB_DNS" == "null" ]; then
-                echo "Final attempt: Waiting additional 30 seconds..."
-                sleep 30
-                if [ -n "$STACK_NAME_TAG" ] && [ "$STACK_NAME_TAG" != "None" ] && [ "$STACK_NAME_TAG" != "NOT_FOUND" ]; then
-                  LB_DNS=$(aws cloudformation describe-stacks \
-                    --stack-name "$STACK_NAME_TAG" \
-                    --region $REGION \
-                    --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" \
-                    --output text 2>/dev/null || echo "")
-                fi
-              fi
-              
-              if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ] && [ "$LB_DNS" != "null" ]; then
-                WP_URL="http://$LB_DNS"
-                echo "WordPress URL: $WP_URL"
-                
-                # Add WP_HOME and WP_SITEURL to wp-config.php
-                # Check if they already exist
-                if ! grep -q "define.*WP_HOME" wp-config.php; then
-                  echo "Adding WP_HOME and WP_SITEURL to wp-config.php..."
-                  # Find the line with "/* That's all, stop editing!" or add before it
-                  if grep -q "That's all, stop editing" wp-config.php; then
-                    # Insert before the "That's all" comment
-                    # Create temporary file with the defines using echo to avoid YAML heredoc issues
-                    echo "define('WP_HOME', 'WP_URL_PLACEHOLDER');" > /tmp/wp-url-config.txt
-                    echo "define('WP_SITEURL', 'WP_URL_PLACEHOLDER');" >> /tmp/wp-url-config.txt
-                    # Replace placeholder with actual URL
-                    sed -i "s|WP_URL_PLACEHOLDER|$WP_URL|g" /tmp/wp-url-config.txt
-                    # Insert before "That's all" comment
-                    sed -i "/That's all, stop editing/r /tmp/wp-url-config.txt" wp-config.php
-                    rm -f /tmp/wp-url-config.txt
-                  else
-                    # Add at the end of the file before closing PHP tag
-                    echo "" >> wp-config.php
-                    echo "/* WordPress URL Configuration */" >> wp-config.php
-                    echo "define('WP_HOME', '$WP_URL');" >> wp-config.php
-                    echo "define('WP_SITEURL', '$WP_URL');" >> wp-config.php
-                  fi
-                  echo "WP_HOME and WP_SITEURL added successfully"
-                else
-                  echo "WP_HOME and WP_SITEURL already exist in wp-config.php"
-                fi
-              else
-                echo "WARNING: Could not retrieve Load Balancer DNS. WP_HOME and WP_SITEURL not configured."
-                echo "You may need to manually add these to wp-config.php after the stack is created."
-              fi
-              
-              echo "Setting file permissions..."
-              chown -R apache:apache /var/www/html
-              chmod -R 755 /var/www/html
-              chmod 644 wp-config.php
-              
-              echo "WordPress configuration file updated successfully"
-              if [ -f wp-config.php ]; then
-                echo "wp-config.php exists: YES"
-              else
-                echo "wp-config.php exists: NO"
-              fi
-            else
-              echo "ERROR: Could not create or find wp-config.php!"
-              echo "Files in current directory:"
-              ls -la
-              exit 1
-            fi
-            
-            # Only install WP-CLI and run wp core install for Development environment
-            if [ $IS_PRODUCTION -eq 0 ]; then
-              # Install WP-CLI for automated WordPress installation
-              echo "Installing WP-CLI..."
-              if [ ! -f /usr/local/bin/wp ]; then
-                curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
-                chmod +x wp-cli.phar
-                mv wp-cli.phar /usr/local/bin/wp
-              else
-                echo "WP-CLI already installed"
-              fi
-              
-              # Complete WordPress installation using WP-CLI
-              echo "Completing WordPress installation..."
-              WP_ADMIN_USER="${WordPressAdminUser}"
-              WP_ADMIN_PASS="${WordPressAdminPassword}"
-              WP_ADMIN_EMAIL="${WordPressAdminEmail}"
-              WP_SITE_TITLE="WordPress Site"
-              
-              # Wait a bit more for database to be fully ready
+            H=""
+            for i in {1..15}; do
+              H=$$(aws rds describe-db-instances --db-instance-identifier "$$D" --query 'DBInstances[0].Endpoint.Address' --output text --region $$R 2>/dev/null || echo "")
+              [ -n "$$H" ] && [ "$$H" != "None" ] && [ "$$H" != "null" ] && break
               sleep 10
-              
-              # Run WordPress installation
-              cd /var/www/html
-              sudo -u apache /usr/local/bin/wp core install \
-                --path=/var/www/html \
-                --url="http://localhost" \
-                --title="$WP_SITE_TITLE" \
-                --admin_user="$WP_ADMIN_USER" \
-                --admin_password="$WP_ADMIN_PASS" \
-                --admin_email="$WP_ADMIN_EMAIL" \
-                --skip-email \
-                --allow-root 2>&1 | tee -a /var/log/wordpress-install.log || {
-                echo "WP-CLI installation failed, checking database connection..." | tee -a /var/log/wordpress-install.log
-                mysql -h $DB_HOST -u $DB_USER -p$DB_PASS -e "USE $DB_NAME; SHOW TABLES;" 2>&1 | tee -a /var/log/wordpress-install.log
-                echo "Attempting manual installation..." | tee -a /var/log/wordpress-install.log
-              }
-              
-              # Restart httpd for development
-              systemctl restart httpd
-              systemctl enable httpd
+            done
+            ([ -z "$$H" ] || [ "$$H" == "None" ]) && exit 1
+            PW="${WordPressAdminPassword}"
+            [ -z "$$PW" ] && exit 1
+            for i in {1..15}; do
+              mysql -h "$$H" -u wordpress -p"$$PW" -e "SELECT 1" 2>/dev/null && break
+              sleep 5
+            done
+            [ ! -f wp-config.php ] && [ -f wp-config-sample.php ] && cp wp-config-sample.php wp-config.php
+            [ ! -f wp-config.php ] && exit 1
+            PE=$$(printf '%s\n' "$$PW" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g' | sed 's/#/\\#/g')
+            sed -i "s#database_name_here#wordpress#g; s#username_here#wordpress#g; s#password_here#$$PE#g; s#localhost#$$H#g" wp-config.php
+            L=""
+            for i in {1..8}; do
+              [ -n "$$S" ] && [ "$$S" != "None" ] && L=$$(aws cloudformation describe-stacks --stack-name "$$S" --region $$R --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" --output text 2>/dev/null || echo "")
+              [ -z "$$L" ] || [ "$$L" == "None" ] && L=$$(aws elbv2 describe-load-balancers --region $$R --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].DNSName' --output text 2>/dev/null | head -1 || echo "")
+              [ -n "$$L" ] && [ "$$L" != "None" ] && [ "$$L" != "null" ] && break
+              sleep 10
+            done
+            [ -n "$$L" ] && [ "$$L" != "None" ] && [ "$$L" != "null" ] && ! grep -q "define.*WP_HOME" wp-config.php && echo "" >> wp-config.php && echo "define('WP_HOME', 'http://$$L');" >> wp-config.php && echo "define('WP_SITEURL', 'http://$$L');" >> wp-config.php
+            chown -R apache:apache /var/www/html && chmod -R 755 /var/www/html && chmod 644 wp-config.php
+            if [ $$PR -eq 0 ]; then
+              [ ! -f /usr/local/bin/wp ] && curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
+              sleep 10
+              U="${WordPressAdminUser}"
+              E="${WordPressAdminEmail}"
+              sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$$U" --admin_password="$$PW" --admin_email="$$E" --skip-email --allow-root || true
+              systemctl restart httpd && systemctl enable httpd
             else
-              echo "Production environment: Skipping WP-CLI installation and wp core install"
-              echo "WordPress should already be installed from AMI"
+              systemctl is-active --quiet httpd && systemctl reload httpd || true
             fi
-            
-            # Set proper permissions after configuration
-            chown -R apache:apache /var/www/html
-            chmod -R 755 /var/www/html
-            chmod 644 wp-config.php
-            
-            # Log completion
-            echo "=========================================="
-            if [ $IS_PRODUCTION -eq 1 ]; then
-              echo "WordPress configuration script completed at $(date)"
-              echo "Production environment: WordPress reconfigured with new database settings"
-            else
-              echo "WordPress installation script completed at $(date)"
-              WP_ADMIN_USER="${WordPressAdminUser}"
-              echo "Admin user: $WP_ADMIN_USER"
-              WP_ADMIN_EMAIL="${WordPressAdminEmail}"
-              echo "Admin email: $WP_ADMIN_EMAIL"
-            fi
-            echo "=========================================="
-            
-            # Verify wp-config.php exists
-            if [ -f /var/www/html/wp-config.php ]; then
-              echo "SUCCESS: wp-config.php configured"
-            else
-              echo "WARNING: wp-config.php not found after configuration"
-            fi
-            
-            # Restart httpd (only if not production, or if production needs a restart)
-            if [ $IS_PRODUCTION -eq 0 ]; then
-              systemctl restart httpd
-              echo "HTTPD restarted"
-            else
-              # For production, just reload if httpd is running
-              if systemctl is-active --quiet httpd; then
-                systemctl reload httpd
-                echo "HTTPD reloaded"
-              fi
-            fi
-            
-            # Download and create hostname display file from GitHub
-            echo "Downloading hostname display file from GitHub..."
-            if curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null; then
-              chown apache:apache /var/www/html/hostname.php
-              chmod 644 /var/www/html/hostname.php
-              echo "Hostname display file downloaded and created: /var/www/html/hostname.php"
-            else
-              echo "WARNING: Could not download hostname.php from GitHub. File will not be available."
-            fi
+            curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 644 /var/www/html/hostname.php || true
 
   # RDS Database for WordPress
   WordPressDBSubnetGroup:

@@ -64,22 +64,15 @@ echo ""
 
 # Check AWS credentials
 echo -e "${YELLOW}Checking AWS credentials...${NC}"
-if ! aws sts get-caller-identity &> /dev/null; then
-    echo -e "${RED}Error: AWS credentials not configured. Please run 'aws configure'${NC}"
+if ! check_aws_credentials; then
     exit 1
 fi
 
-AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-echo -e "${GREEN}AWS Account: $AWS_ACCOUNT${NC}"
+get_aws_account
 echo ""
 
 # Check if stack exists
-STACK_EXISTS=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --region "$REGION" \
-    2>/dev/null || echo "")
-
-if [ -z "$STACK_EXISTS" ]; then
+if ! check_stack_exists "$STACK_NAME" "$REGION"; then
     echo -e "${RED}Stack '$STACK_NAME' not found in region '$REGION'${NC}"
     exit 1
 fi
@@ -99,7 +92,12 @@ else
     echo -e "${RED}Failed to delete stack!${NC}"
     echo ""
     echo -e "${YELLOW}Stack Status:${NC}"
-    aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "Stack not found"
+    STACK_STATUS=$(get_stack_status "$STACK_NAME" "$REGION")
+    if [ -n "$STACK_STATUS" ]; then
+        echo "$STACK_STATUS"
+    else
+        echo "Stack not found"
+    fi
 
     echo ""
     echo -e "${YELLOW}Recent Stack Events (showing failures):${NC}"

@@ -73,13 +73,11 @@ echo ""
 
 # Check AWS credentials
 echo -e "${YELLOW}Checking AWS credentials...${NC}"
-if ! aws sts get-caller-identity &> /dev/null; then
-    echo -e "${RED}Error: AWS credentials not configured. Please run 'aws configure'${NC}"
+if ! check_aws_credentials; then
     exit 1
 fi
 
-AWS_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-echo -e "${GREEN}AWS Account: $AWS_ACCOUNT${NC}"
+get_aws_account
 echo ""
 
 # Get AMI ID

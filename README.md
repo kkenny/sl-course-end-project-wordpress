@@ -70,6 +70,16 @@ This repository contains a complete solution for deploying and managing **two se
 ## Prerequisites
 
 1. **AWS Account** with appropriate permissions
+   - Your IAM user/role needs the following permissions:
+     - `ec2:*` (or at minimum: `ec2:CreateLaunchTemplate`, `ec2:RunInstances`, `ec2:Describe*`, `ec2:CreateTags`)
+     - `autoscaling:*` (or at minimum: `autoscaling:CreateAutoScalingGroup`, `autoscaling:UpdateAutoScalingGroup`, `autoscaling:Describe*`)
+     - `rds:*` (or at minimum: `rds:CreateDBInstance`, `rds:DescribeDBInstances`)
+     - `elasticloadbalancing:*` (or at minimum: `elasticloadbalancing:CreateLoadBalancer`, `elasticloadbalancing:CreateTargetGroup`, `elasticloadbalancing:Describe*`)
+     - `lambda:*` (or at minimum: `lambda:CreateFunction`, `lambda:InvokeFunction`)
+     - `events:*` (or at minimum: `events:PutRule`, `events:PutTargets`)
+     - `iam:*` (or at minimum: `iam:CreateRole`, `iam:AttachRolePolicy`, `iam:CreateInstanceProfile`)
+     - `cloudformation:*` (or at minimum: `cloudformation:CreateStack`, `cloudformation:DescribeStacks`)
+   - **Important:** For launch templates, you need `ec2:RunInstances` permission that includes the launch template resource ARN
 2. **AWS CLI** installed and configured
    ```bash
    aws configure
@@ -363,6 +373,25 @@ aws ec2 stop-instances --instance-ids <instance-id>
 
 1. Check CloudFormation events in AWS Console
 2. Verify IAM permissions (requires EC2, RDS, Lambda, Auto Scaling permissions)
+   - **Common issue:** "You are not authorized to use launch template" error
+     - Ensure your IAM user/role has `ec2:RunInstances` permission
+     - The permission should allow using launch templates: `"Resource": "arn:aws:ec2:*:*:launch-template/*"`
+     - Example policy:
+       ```json
+       {
+         "Version": "2012-10-17",
+         "Statement": [
+           {
+             "Effect": "Allow",
+             "Action": "ec2:RunInstances",
+             "Resource": [
+               "arn:aws:ec2:*:*:instance/*",
+               "arn:aws:ec2:*:*:launch-template/*"
+             ]
+           }
+         ]
+       }
+       ```
 3. Ensure Key Pair exists in the region
 4. Check if default VPC limits are not exceeded
 

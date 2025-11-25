@@ -12,7 +12,7 @@ source "${SCRIPT_DIR}/../_common.sh"
 
 # Configuration
 STACK_NAME="${1:-wordpress-dev}"
-REGION="${AWS_REGION:-us-east-2}"
+REGION="${AWS_REGION:-us-east-1}"
 
 echo -e "${BLUE}CloudFormation Stack Status Check${NC}"
 echo "=================================="
