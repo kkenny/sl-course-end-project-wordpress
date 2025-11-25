@@ -7,8 +7,8 @@ set -e
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source common functions
-source "${SCRIPT_DIR}/_common.sh"
+# Source common functions (go up one directory since we're in utils/)
+source "${SCRIPT_DIR}/../_common.sh"
 
 # Initialize variables
 STACK_NAME=""
@@ -105,8 +105,7 @@ if [ -z "$STACK_NAME" ]; then
 fi
 
 # Check AWS credentials
-if ! aws sts get-caller-identity &> /dev/null; then
-    echo -e "${RED}Error: AWS credentials not configured${NC}"
+if ! check_aws_credentials; then
     exit 1
 fi
 
@@ -117,7 +116,7 @@ echo "Region: $REGION"
 echo ""
 
 # Check if stack exists
-if ! aws cloudformation describe-stacks --stack-name "$STACK_NAME" --region "$REGION" &> /dev/null; then
+if ! check_stack_exists "$STACK_NAME" "$REGION"; then
     echo -e "${RED}Error: Stack '$STACK_NAME' not found in region '$REGION'${NC}"
     exit 1
 fi

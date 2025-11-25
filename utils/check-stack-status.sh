@@ -7,8 +7,8 @@ set -e
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source common functions
-source "${SCRIPT_DIR}/_common.sh"
+# Source common functions (go up one directory since we're in utils/)
+source "${SCRIPT_DIR}/../_common.sh"
 
 # Configuration
 STACK_NAME="${1:-wordpress-dev}"
@@ -21,23 +21,14 @@ echo "Region: $REGION"
 echo ""
 
 # Check if stack exists
-STACK_EXISTS=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --region "$REGION" \
-    2>/dev/null || echo "")
-
-if [ -z "$STACK_EXISTS" ]; then
+if ! check_stack_exists "$STACK_NAME" "$REGION"; then
     echo -e "${RED}Stack '$STACK_NAME' not found in region '$REGION'${NC}"
     exit 1
 fi
 
 # Get stack status
 echo -e "${YELLOW}Stack Status:${NC}"
-STATUS=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --region "$REGION" \
-    --query "Stacks[0].StackStatus" \
-    --output text)
+STATUS=$(get_stack_status "$STACK_NAME" "$REGION")
 
 if [[ "$STATUS" == *"COMPLETE"* ]] && [[ "$STATUS" != *"ROLLBACK"* ]]; then
     echo -e "${GREEN}$STATUS${NC}"
