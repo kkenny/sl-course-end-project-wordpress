@@ -128,3 +128,173 @@ teardown() {
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
+@test "create-ami.sh shows help with -h flag" {
+    run "${PROJECT_ROOT}/create-ami.sh" -h
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+    [[ "$output" =~ "--stack-name" ]]
+}
+
+@test "create-ami.sh shows help with --help flag" {
+    run "${PROJECT_ROOT}/create-ami.sh" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+}
+
+@test "create-ami.sh rejects unknown option" {
+    run "${PROJECT_ROOT}/create-ami.sh" --unknown-option
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "Unknown option" ]]
+}
+
+@test "create-ami.sh accepts stack-name argument" {
+    run "${PROJECT_ROOT}/create-ami.sh" -s test-stack 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "create-ami.sh accepts region argument" {
+    run "${PROJECT_ROOT}/create-ami.sh" -s test-stack -r us-west-2 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "create-ami.sh accepts name-prefix argument" {
+    run "${PROJECT_ROOT}/create-ami.sh" -s test-stack -n my-prefix 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "create-ami.sh accepts description argument" {
+    run "${PROJECT_ROOT}/create-ami.sh" -s test-stack -d "Test description" 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "update-launch-template-with-ami.sh shows help with -h flag" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" -h
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+    [[ "$output" =~ "--stack-name" ]]
+}
+
+@test "update-launch-template-with-ami.sh shows help with --help flag" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+}
+
+@test "update-launch-template-with-ami.sh rejects unknown option" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" --unknown-option
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "Unknown option" ]]
+}
+
+@test "update-launch-template-with-ami.sh accepts stack-name argument" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" -s test-stack 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "update-launch-template-with-ami.sh accepts region argument" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" -s test-stack -r us-west-2 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "update-launch-template-with-ami.sh accepts ami-id argument" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" -s test-stack -a ami-12345678 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "update-launch-template-with-ami.sh accepts ami-file argument" {
+    run "${PROJECT_ROOT}/update-launch-template-with-ami.sh" -s test-stack -f ami-file.txt 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/create-key-pair.sh shows help with -h flag" {
+    run "${PROJECT_ROOT}/utils/create-key-pair.sh" -h
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+    [[ "$output" =~ "--key-pair" ]]
+}
+
+@test "utils/create-key-pair.sh shows help with --help flag" {
+    run "${PROJECT_ROOT}/utils/create-key-pair.sh" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+}
+
+@test "utils/create-key-pair.sh accepts key-pair argument" {
+    run "${PROJECT_ROOT}/utils/create-key-pair.sh" -k test-key 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/create-key-pair.sh accepts region argument" {
+    run "${PROJECT_ROOT}/utils/create-key-pair.sh" -k test-key -r us-west-2 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/create-key-pair.sh accepts legacy positional argument" {
+    run "${PROJECT_ROOT}/utils/create-key-pair.sh" test-key 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh shows help with -h flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -h
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+    [[ "$output" =~ "--stack-name" ]]
+}
+
+@test "utils/get-stack-info.sh shows help with --help flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" --help
+    [ "$status" -eq 0 ]
+    [[ "$output" =~ "Usage:" ]]
+}
+
+@test "utils/get-stack-info.sh rejects unknown option" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" --unknown-option
+    [ "$status" -ne 0 ]
+    [[ "$output" =~ "Unknown option" ]]
+}
+
+@test "utils/get-stack-info.sh accepts stack-name argument" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts region argument" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -r us-west-2 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts events flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -e 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts resources flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -R 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts outputs flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -o 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts parameters flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -p 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts instances flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -i 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts database flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -d 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
+@test "utils/get-stack-info.sh accepts all flag" {
+    run "${PROJECT_ROOT}/utils/get-stack-info.sh" -s test-stack -a 2>&1 || true
+    [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
+}
+
