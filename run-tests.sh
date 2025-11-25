@@ -33,10 +33,61 @@ if [ ! -f "$BATS_BIN" ]; then
     exit 1
 fi
 
+# Check for help flag
+if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    echo "Usage: $0 [OPTIONS] [TEST_FILES...]"
+    echo ""
+    echo "Options:"
+    echo "  -h, --help          Show this help message"
+    echo "  -i, --integration  Run integration tests (requires deployed stacks)"
+    echo "  -p, --performance  Run performance tests (requires deployed stacks)"
+    echo "  -a, --all           Run all tests (unit, integration, and performance)"
+    echo ""
+    echo "Examples:"
+    echo "  $0                                    # Run all unit tests"
+    echo "  $0 --integration                      # Run all integration tests"
+    echo "  $0 --performance                      # Run all performance tests"
+    echo "  $0 --integration STACK_NAME=wordpress-prod  # Run integration tests for specific stack"
+    echo "  $0 --performance STACK_NAME=wordpress-prod  # Run performance tests for specific stack"
+    echo "  $0 --all                              # Run all tests"
+    echo "  $0 tests/unit/test_common.bats         # Run specific test file"
+    echo ""
+    echo "Integration/Performance Test Environment Variables:"
+    echo "  STACK_NAME          Stack name to test (default: wordpress-dev)"
+    echo "  REGION              AWS region (default: us-east-1 or AWS_REGION)"
+    echo "  LOAD_TEST_DURATION  Duration for load tests in seconds (default: 120)"
+    echo "  LOAD_TEST_CONCURRENT Concurrent requests for load tests (default: 100)"
+    echo ""
+    exit 0
+fi
+
 # Determine which tests to run
 if [ $# -eq 0 ]; then
-    # Run all tests
+    # Run all unit tests by default
     TEST_FILES="${SCRIPT_DIR}/tests/unit/*.bats"
+elif [ "$1" = "--integration" ] || [ "$1" = "-i" ]; then
+    # Run integration tests
+    shift
+    if [ $# -eq 0 ]; then
+        TEST_FILES="${SCRIPT_DIR}/tests/integration/*.bats"
+    else
+        TEST_FILES="$@"
+    fi
+elif [ "$1" = "--performance" ] || [ "$1" = "-p" ]; then
+    # Run performance tests
+    shift
+    if [ $# -eq 0 ]; then
+        TEST_FILES="${SCRIPT_DIR}/tests/performance/*.bats"
+    else
+        TEST_FILES="$@"
+    fi
+elif [ "$1" = "--all" ] || [ "$1" = "-a" ]; then
+    # Run all tests (unit, integration, and performance)
+    TEST_FILES="${SCRIPT_DIR}/tests/unit/*.bats ${SCRIPT_DIR}/tests/integration/*.bats ${SCRIPT_DIR}/tests/performance/*.bats"
+    shift
+    if [ $# -gt 0 ]; then
+        TEST_FILES="$TEST_FILES $@"
+    fi
 else
     # Run specific test files
     TEST_FILES="$@"

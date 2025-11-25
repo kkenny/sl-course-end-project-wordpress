@@ -34,29 +34,51 @@ Run specific test files:
 ./run-tests.sh tests/unit/test_common.bats tests/unit/test_common_update_template.bats
 ```
 
+Run integration tests:
+
+```bash
+# Run all integration tests
+./run-tests.sh --integration
+
+# Run integration tests for a specific stack
+STACK_NAME=wordpress-dev ./run-tests.sh --integration
+
+# Run integration tests for a specific stack and region
+STACK_NAME=wordpress-prod REGION=us-west-2 ./run-tests.sh --integration
+```
+
+Run both unit and integration tests:
+
+```bash
+./run-tests.sh --all
+```
+
 Or use bats directly:
 
 ```bash
 ./test_helper/bats-core/bin/bats tests/unit/
+./test_helper/bats-core/bin/bats tests/integration/
 ```
 
 ## Test Structure
 
-Tests are located in the `tests/unit/` directory:
+Tests are organized into two categories:
 
 ```
 tests/
-└── unit/
-    ├── test_common.bats                          # Tests for _common.sh functions
-    ├── test_common_update_template.bats           # Tests for template update functions
-    ├── test_common_get_latest_ami.bats           # Tests for get_latest_ami() with AWS mocking
-    ├── test_common_get_aws_account.bats           # Tests for get_aws_account() success/failure
-    ├── test_common_validate_key_pair.bats        # Enhanced tests for validate_key_pair()
-    ├── test_common_auto_select_key_pair.bats     # Tests for auto_select_key_pair() function
-    ├── test_common_check_stack_exists.bats        # Tests for check_stack_exists() with AWS mocking
-    ├── test_common_get_stack_status.bats          # Tests for get_stack_status() with AWS mocking
-    ├── test_common_check_aws_credentials.bats    # Tests for check_aws_credentials() with AWS mocking
-    └── test_script_args.bats                     # Tests for script argument parsing
+├── unit/                                          # Unit tests (isolated, mocked)
+│   ├── test_common.bats                          # Tests for _common.sh functions
+│   ├── test_common_update_template.bats           # Tests for template update functions
+│   ├── test_common_get_latest_ami.bats           # Tests for get_latest_ami() with AWS mocking
+│   ├── test_common_get_aws_account.bats           # Tests for get_aws_account() success/failure
+│   ├── test_common_validate_key_pair.bats        # Enhanced tests for validate_key_pair()
+│   ├── test_common_auto_select_key_pair.bats     # Tests for auto_select_key_pair() function
+│   ├── test_common_check_stack_exists.bats        # Tests for check_stack_exists() with AWS mocking
+│   ├── test_common_get_stack_status.bats          # Tests for get_stack_status() with AWS mocking
+│   ├── test_common_check_aws_credentials.bats    # Tests for check_aws_credentials() with AWS mocking
+│   └── test_script_args.bats                     # Tests for script argument parsing
+└── integration/                                  # Integration tests (require deployed stacks)
+    └── test_deployment.bats                      # Post-deployment verification tests
 ```
 
 ## Writing Tests
@@ -136,24 +158,25 @@ To mock AWS CLI commands or other external dependencies, you can override functi
 
 ## Test Coverage Summary
 
-**Total Test Files:** 10  
-**Total Tests:** 97  
+**Total Test Files:** 11 (10 unit + 1 integration)  
+**Total Tests:** 103 (97 unit + 6 integration)  
 **Test Framework:** bats-core
 
 ### Quick Statistics
 
-- **Core Functions:** 9 functions fully tested (47 tests across 9 test files)
-- **Script Argument Parsing:** 9 scripts fully tested (50 tests in 1 test file)
-- **AWS CLI Mocking:** All AWS-dependent functions use isolated mocking
+- **Unit Tests:** 97 tests covering core functions and script argument parsing
+- **Integration Tests:** 6 tests for post-deployment verification
+- **AWS CLI Mocking:** All AWS-dependent unit tests use isolated mocking
 - **Error Handling:** Comprehensive edge case and failure scenario coverage
 
 ### Test Breakdown by Category
 
 | Category | Test Files | Tests | Status |
 |----------|-----------|-------|--------|
-| Core Functions (`_common.sh`) | 9 | 47 | ✅ Complete |
-| Script Argument Parsing | 1 | 50 | ✅ Complete |
-| **Total** | **10** | **97** | **✅ All Passing** |
+| Unit Tests - Core Functions (`_common.sh`) | 9 | 47 | ✅ Complete |
+| Unit Tests - Script Argument Parsing | 1 | 50 | ✅ Complete |
+| Integration Tests - Deployment Verification | 1 | 6 | ✅ Complete |
+| **Total** | **11** | **103** | **✅ All Passing** |
 
 ### Test Files Breakdown
 
@@ -212,7 +235,57 @@ You can run specific categories of tests:
 
 # Run tests for AWS credential functions
 ./run-tests.sh tests/unit/test_common_check_aws_credentials.bats tests/unit/test_common_get_aws_account.bats
+
+# Run integration tests (requires deployed stack)
+STACK_NAME=wordpress-dev ./run-tests.sh --integration
+
+# Run integration tests for production stack
+STACK_NAME=wordpress-prod REGION=us-east-1 ./run-tests.sh --integration
+
+# Run all tests (unit + integration)
+./run-tests.sh --all
 ```
+
+## Integration Tests
+
+Integration tests verify that deployed stacks are working correctly. These tests:
+
+- **Require AWS credentials** - Must have valid AWS credentials configured
+- **Require deployed stacks** - The stack must exist and be in a completed state
+- **Make real HTTP requests** - Tests actually connect to deployed load balancers
+- **Can be environment-specific** - Use `STACK_NAME` and `REGION` environment variables
+
+### Running Integration Tests
+
+```bash
+# Test default stack (wordpress-dev in us-east-1)
+./run-tests.sh --integration
+
+# Test specific stack
+STACK_NAME=wordpress-prod ./run-tests.sh --integration
+
+# Test specific stack and region
+STACK_NAME=wordpress-prod REGION=us-west-2 ./run-tests.sh --integration
+
+# Test a specific integration test file
+./run-tests.sh tests/integration/test_deployment.bats
+```
+
+### Integration Test Requirements
+
+- AWS CLI configured with valid credentials
+- Stack must be deployed and in `CREATE_COMPLETE` or `UPDATE_COMPLETE` state
+- Stack must have `WordPressURL` output defined
+- Load balancer must be accessible (may take a few minutes after deployment)
+- `curl` command must be available
+
+### What Integration Tests Verify
+
+1. **WordPress URL Accessibility** - Verifies HTTP 200 response from WordPress URL
+2. **HTML Content** - Verifies WordPress returns HTML content
+3. **hostname.php Endpoint** - Verifies custom PHP endpoint is accessible
+4. **Load Balancer DNS** - Verifies load balancer DNS is accessible
+5. **Stack Status** - Verifies stack is in a completed state
 
 ## Continuous Integration
 
