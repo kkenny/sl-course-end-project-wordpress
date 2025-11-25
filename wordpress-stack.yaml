@@ -219,7 +219,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
       LaunchTemplateData:
-        ImageId: ami-09887f71d98a72a5c  # Amazon Linux 2 AMI (update with your region's AMI)
+        ImageId: ami-0979de60fed46582f  # Amazon Linux 2 AMI (update with your region's AMI)
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:

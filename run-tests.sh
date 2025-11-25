@@ -2,7 +2,8 @@
 
 # Test runner script for bats-core tests
 
-set -e
+# Don't exit on error - we want to update badge and commit even if tests fail
+set +e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BATS_BIN="${SCRIPT_DIR}/test_helper/bats-core/bin/bats"
@@ -162,8 +163,100 @@ EXIT_CODE=$OVERALL_EXIT
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}✓ All tests passed!${NC}"
+    TEST_STATUS="passing"
+    BADGE_COLOR="brightgreen"
 else
     echo -e "${RED}✗ Some tests failed${NC}"
+    TEST_STATUS="failing"
+    BADGE_COLOR="red"
+fi
+
+# Function to update test badge in README.md
+update_test_badge() {
+    local readme_file="${SCRIPT_DIR}/README.md"
+    local badge_text="[![Tests](https://img.shields.io/badge/tests-${TEST_STATUS}-${BADGE_COLOR})](tests)"
+    local timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+    
+    if [ ! -f "$readme_file" ]; then
+        echo "Warning: README.md not found, skipping badge update" >&2
+        return 1
+    fi
+    
+    # Create a temporary file for the updated README
+    local temp_file=$(mktemp)
+    
+    # Check if badge already exists in README
+    if grep -q "^\[!\[Tests\]" "$readme_file"; then
+        # Update existing badge line
+        awk -v badge="$badge_text" -v timestamp="$timestamp" '
+        /^\[!\[Tests\]/ {
+            print badge
+            next
+        }
+        /^<!-- Tests last run:/ {
+            print "<!-- Tests last run: " timestamp " -->"
+            next
+        }
+        {
+            print
+        }
+        ' "$readme_file" > "$temp_file"
+    else
+        # Add badge at the very top of README
+        {
+            echo "$badge_text"
+            echo "<!-- Tests last run: ${timestamp} -->"
+            echo ""
+            cat "$readme_file"
+        } > "$temp_file"
+    fi
+    
+    # Replace original file with updated version
+    mv "$temp_file" "$readme_file"
+    
+    echo "Updated test badge in README.md: ${TEST_STATUS}" >&2
+    return 0
+}
+
+# Function to commit README.md changes
+commit_readme_changes() {
+    local readme_file="${SCRIPT_DIR}/README.md"
+    
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        echo "Not in a git repository, skipping commit" >&2
+        return 1
+    fi
+    
+    # Check if README.md has changes
+    if ! git diff --quiet "$readme_file" 2>/dev/null; then
+        # Stage the README.md file
+        git add "$readme_file" > /dev/null 2>&1
+        
+        # Commit with a descriptive message
+        local commit_message="Update test status badge: ${TEST_STATUS} [skip ci]"
+        if git commit -m "$commit_message" > /dev/null 2>&1; then
+            echo "Committed test badge update to README.md" >&2
+            return 0
+        else
+            echo "Warning: Failed to commit README.md changes" >&2
+            return 1
+        fi
+    else
+        echo "No changes to README.md to commit" >&2
+        return 0
+    fi
+}
+
+# Update badge and commit if tests were run
+if [ -n "$TEST_FILES" ]; then
+    echo ""
+    echo -e "${BLUE}Updating test status badge...${NC}"
+    update_test_badge
+    
+    echo -e "${BLUE}Committing README.md changes...${NC}"
+    commit_readme_changes
+    echo ""
 fi
 
 exit $EXIT_CODE

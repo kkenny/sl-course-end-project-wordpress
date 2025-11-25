@@ -3,10 +3,12 @@
 # Integration tests for post-deployment verification
 # These tests verify that deployed stacks are working correctly
 
-setup() {
+# setup_file runs once before all tests
+setup_file() {
     TEST_DIR="$(cd "$(dirname "${BATS_TEST_FILENAME}")" && pwd)"
     PROJECT_ROOT="$(cd "${TEST_DIR}/../.." && pwd)"
     
+    export PROJECT_ROOT
     export COMMON_DIR="$PROJECT_ROOT"
     export SCRIPT_DIR="$PROJECT_ROOT"
     
@@ -29,46 +31,71 @@ setup() {
     source "${PROJECT_ROOT}/_common.sh"
     
     # Default stack name and region (can be overridden with environment variables)
-    STACK_NAME="${STACK_NAME:-wordpress-dev}"
-    REGION="${REGION:-${AWS_REGION:-us-east-1}}"
+    export STACK_NAME="${STACK_NAME:-wordpress-dev}"
+    export REGION="${REGION:-${AWS_REGION:-us-east-1}}"
     
     # Check if AWS credentials are configured
     # Verify credentials are available (either from _set_profile.sh or already set)
     if [ -z "$AWS_ACCESS_KEY_ID" ] && [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
         # Try to verify with AWS CLI
         if ! aws sts get-caller-identity &> /dev/null; then
-            skip "AWS credentials not configured. Ensure _set_profile.sh exports AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or run 'aws configure'"
+            echo "AWS credentials not configured. Ensure _set_profile.sh exports AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or run 'aws configure'" >&2
+            exit 1
         fi
     elif ! check_aws_credentials; then
-        skip "AWS credentials from _set_profile.sh are invalid or expired. Please check your credentials."
+        echo "AWS credentials from _set_profile.sh are invalid or expired. Please check your credentials." >&2
+        exit 1
     fi
     
-    # Check if stack exists
+    # Check if stack exists - fail early if it doesn't exist
+    # This prevents all tests from running if the environment isn't deployed
     if ! check_stack_exists "$STACK_NAME" "$REGION"; then
-        skip "Stack '$STACK_NAME' does not exist in region '$REGION'"
+        echo "Stack '$STACK_NAME' does not exist in region '$REGION'" >&2
+        echo "Please deploy the stack before running integration tests." >&2
+        exit 1
     fi
     
     # Get WordPress URL from stack outputs
-    WORDPRESS_URL=$(aws cloudformation describe-stacks \
+    export WORDPRESS_URL=$(aws cloudformation describe-stacks \
         --stack-name "$STACK_NAME" \
         --region "$REGION" \
         --query "Stacks[0].Outputs[?OutputKey=='WordPressURL'].OutputValue" \
         --output text 2>/dev/null || echo "")
     
+    # Verify WordPressURL output exists - fail early if missing
     if [ -z "$WORDPRESS_URL" ] || [ "$WORDPRESS_URL" == "None" ]; then
-        skip "WordPressURL output not found for stack '$STACK_NAME'"
+        echo "WordPressURL output not found for stack '$STACK_NAME'" >&2
+        echo "The stack exists but is missing the WordPressURL output." >&2
+        exit 1
     fi
 }
 
+setup() {
+    # setup() runs before each test
+    # Most setup is done in setup_file, but we can add per-test setup here if needed
+    :
+}
+
 teardown() {
+    # Per-test teardown (if needed)
+    :
+}
+
+# teardown_file runs once after all tests
+teardown_file() {
     # Restore _set_profile.sh if it was backed up
-    if [ -f "${PROJECT_ROOT}/_set_profile.sh.bak" ]; then
+    # PROJECT_ROOT should be available from setup_file
+    if [ -n "$PROJECT_ROOT" ] && [ -f "${PROJECT_ROOT}/_set_profile.sh.bak" ]; then
         mv "${PROJECT_ROOT}/_set_profile.sh.bak" "${PROJECT_ROOT}/_set_profile.sh" 2>/dev/null || true
     fi
 }
 
+# Note: Stack existence and WordPressURL output are now verified in setup_file()
+# If they don't exist, setup_file() will exit with error code 1, preventing all tests from running
+
 @test "WordPress URL is accessible and returns 200" {
     # Make HTTP request to WordPress URL
+    # Note: WORDPRESS_URL is guaranteed to be set by setup_file()
     run curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$WORDPRESS_URL"
     
     [ "$status" -eq 0 ]
