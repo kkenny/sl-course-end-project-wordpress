@@ -1,5 +1,5 @@
-[![Tests](https://img.shields.io/badge/tests-failing-red)](tests)
-<!-- Tests last run: 2025-11-25 21:53:56 UTC -->
+[![Integration Tests](https://img.shields.io/badge/integration%20tests-failing-red)](tests/integration)
+<!-- Tests last run: 2025-11-25 22:07:52 UTC -->
 
 # SimpliLearn Course End Project: Set Up and Monitor a WordPress Instance
 
