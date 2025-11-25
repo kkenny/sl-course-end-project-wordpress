@@ -7,8 +7,8 @@ set -e
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source common functions
-source "${SCRIPT_DIR}/_common.sh"
+# Source common functions (go up one directory since we're in utils/)
+source "${SCRIPT_DIR}/../_common.sh"
 
 # Initialize variables for command-line arguments
 KEY_PAIR_NAME=""
