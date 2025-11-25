@@ -230,7 +230,8 @@ Resources:
           Fn::Base64:
             Fn::Sub: |
               #!/bin/bash
-              echo "hello debug"
+              > /var/log/wordpress-install.log #Make sure the log file is clean
+              [ -f /var/www/html/wp-config.php ] && rm -f /var/www/html/wp-config.php
               exec >>/var/log/wordpress-install.log 2>&1
               set +e
               R=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
@@ -289,7 +290,8 @@ Resources:
               else
                 systemctl is-active --quiet httpd && systemctl reload httpd || true
               fi
-              curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 644 /var/www/html/hostname.php || true
+              mkdir -p /var/www/html && echo "$S" > /var/www/html/stack.txt
+              curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 755 /var/www/html/hostname.php || true
 
   # RDS Database for WordPress
   WordPressDBSubnetGroup:
