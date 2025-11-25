@@ -185,32 +185,32 @@ fi
 # Show EC2 instance information
 if [ "$SHOW_INSTANCES" = true ]; then
     echo -e "${YELLOW}EC2 Instances:${NC}"
-    
+
     # Get Auto Scaling Group name
     ASG_NAME=$(aws cloudformation describe-stack-resources --stack-name "$STACK_NAME" --region "$REGION" \
         --query 'StackResources[?ResourceType==`AWS::AutoScaling::AutoScalingGroup`].PhysicalResourceId' \
         --output text 2>/dev/null || echo "")
-    
+
     if [ -n "$ASG_NAME" ] && [ "$ASG_NAME" != "None" ]; then
         echo "Auto Scaling Group: $ASG_NAME"
-        
+
         # Get instances in the ASG
         INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "$ASG_NAME" \
             --region "$REGION" \
             --query 'AutoScalingGroups[0].Instances[*].[InstanceId,LifecycleState,HealthStatus]' \
             --output table 2>/dev/null || echo "")
-        
+
         if [ -n "$INSTANCES" ] && [ "$INSTANCES" != "None" ]; then
             echo "$INSTANCES"
-            
+
             # Get instance details
             INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
                 --auto-scaling-group-names "$ASG_NAME" \
                 --region "$REGION" \
                 --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
                 --output text 2>/dev/null || echo "")
-            
+
             if [ -n "$INSTANCE_IDS" ] && [ "$INSTANCE_IDS" != "None" ]; then
                 echo ""
                 echo "Instance Details:"
@@ -220,7 +220,7 @@ if [ "$SHOW_INSTANCES" = true ]; then
                         --region "$REGION" \
                         --query 'Reservations[0].Instances[0].[InstanceId,State.Name,PublicIpAddress,PrivateIpAddress,InstanceType]' \
                         --output text 2>/dev/null || echo "")
-                    
+
                     if [ -n "$INSTANCE_INFO" ] && [ "$INSTANCE_INFO" != "None" ]; then
                         echo "  Instance ID: $(echo $INSTANCE_INFO | awk '{print $1}')"
                         echo "    State: $(echo $INSTANCE_INFO | awk '{print $2}')"
@@ -242,19 +242,19 @@ fi
 # Show RDS database information
 if [ "$SHOW_DATABASE" = true ]; then
     echo -e "${YELLOW}RDS Database:${NC}"
-    
+
     # Get database instance identifier
     DB_INSTANCE=$(aws cloudformation describe-stack-resources --stack-name "$STACK_NAME" --region "$REGION" \
         --query 'StackResources[?ResourceType==`AWS::RDS::DBInstance`].PhysicalResourceId' \
         --output text 2>/dev/null || echo "")
-    
+
     if [ -n "$DB_INSTANCE" ] && [ "$DB_INSTANCE" != "None" ]; then
         DB_INFO=$(aws rds describe-db-instances \
             --db-instance-identifier "$DB_INSTANCE" \
             --region "$REGION" \
             --query 'DBInstances[0].[DBInstanceStatus,Engine,EngineVersion,DBInstanceClass,Endpoint.Address,Endpoint.Port]' \
             --output text 2>/dev/null || echo "")
-        
+
         if [ -n "$DB_INFO" ] && [ "$DB_INFO" != "None" ]; then
             echo "  Instance ID: $DB_INSTANCE"
             echo "  Status: $(echo $DB_INFO | awk '{print $1}')"
@@ -284,7 +284,7 @@ if [ -n "$LOAD_BALANCER_DNS" ] && [ "$LOAD_BALANCER_DNS" != "None" ]; then
         --region "$REGION" \
         --query 'LoadBalancers[0].DNSName' \
         --output text 2>/dev/null || echo "")
-    
+
     if [ -n "$LB_DNS" ] && [ "$LB_DNS" != "None" ]; then
         echo -e "${GREEN}WordPress URL: http://$LB_DNS${NC}"
         echo ""

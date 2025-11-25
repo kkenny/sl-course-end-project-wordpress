@@ -5,9 +5,12 @@ if [ -z "$SCRIPT_DIR" ]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 fi
 
-# Source profile (if _set_profile.sh exists)
-if [ -f "${SCRIPT_DIR}/_set_profile.sh" ]; then
-    source "${SCRIPT_DIR}/_set_profile.sh"
+# Get the directory where _common.sh is located (always use this for finding _set_profile.sh)
+COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source profile (if _set_profile.sh exists in the same directory as _common.sh)
+if [ -f "${COMMON_DIR}/_set_profile.sh" ]; then
+    source "${COMMON_DIR}/_set_profile.sh"
 fi
 
 # Common Variables

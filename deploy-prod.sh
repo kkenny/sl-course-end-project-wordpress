@@ -16,7 +16,7 @@ WP_EMAIL=""
 PROMPT_PASSWORD=false
 KEY_PAIR_NAME=""
 REGION=""
-INSTANCE_TYPE="t3.medium"
+INSTANCE_TYPE="t3.micro"
 AMI_ID=""
 
 # Parse command-line arguments

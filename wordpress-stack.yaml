@@ -219,7 +219,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
       LaunchTemplateData:
-        ImageId: ami-05352a123d0eb54f3  # Amazon Linux 2 AMI (update with your region's AMI)
+        ImageId: ami-09887f71d98a72a5c  # Amazon Linux 2 AMI (update with your region's AMI)
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:
@@ -227,67 +227,69 @@ Resources:
         SecurityGroupIds:
           - !Ref WordPressSecurityGroup
         UserData:
-          Fn::Base64: !Sub |
-            #!/bin/bash
-            exec >>/var/log/wordpress-install.log 2>&1
-            set +e
-            R=$$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
-            I=$$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
-            sleep 5
-            S=$$(aws ec2 describe-instances --instance-ids "$$I" --region $$R --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' --output text 2>/dev/null || echo "")
-            PR=0
-            [ -n "$$S" ] && [ "$$S" != "None" ] && E=$$(aws cloudformation describe-stacks --stack-name "$$S" --region $$R --query 'Stacks[0].Parameters[?ParameterKey==`Environment`].ParameterValue' --output text 2>/dev/null || echo "") && ([ "$$E" == "Production" ] || [[ "$$S" == *"prod"* ]] || [[ "$$S" == *"Prod"* ]] || [[ "$$S" == *"PROD"* ]]) && PR=1
-            if [ $$PR -eq 0 ]; then
-              yum update -y
-              amazon-linux-extras list | grep -q php8.2 && amazon-linux-extras install php8.2 -y || amazon-linux-extras list | grep -q php8.1 && amazon-linux-extras install php8.1 -y || amazon-linux-extras list | grep -q php8.0 && amazon-linux-extras install php8.0 -y || (yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm https://rpms.remirepo.net/enterprise/remi-release-7.rpm && (yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80))
-              yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip && systemctl start httpd && systemctl enable httpd
-              cd /var/www/html && wget -q https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && mv wordpress/* . && rm -rf wordpress latest.tar.gz
-            else
-              cd /var/www/html
-            fi
-            D="wordpress-db"
-            if [ $$PR -eq 1 ]; then
-              D="Production-wordpress-db"
-            elif [[ "$$S" == *"dev"* ]] || [[ "$$S" == *"Dev"* ]] || [[ "$$S" == *"DEV"* ]]; then
-              D="Development-wordpress-db"
-            fi
-            H=""
-            for i in {1..15}; do
-              H=$$(aws rds describe-db-instances --db-instance-identifier "$$D" --query 'DBInstances[0].Endpoint.Address' --output text --region $$R 2>/dev/null || echo "")
-              [ -n "$$H" ] && [ "$$H" != "None" ] && [ "$$H" != "null" ] && break
-              sleep 10
-            done
-            ([ -z "$$H" ] || [ "$$H" == "None" ]) && exit 1
-            PW="${WordPressAdminPassword}"
-            [ -z "$$PW" ] && exit 1
-            for i in {1..15}; do
-              mysql -h "$$H" -u wordpress -p"$$PW" -e "SELECT 1" 2>/dev/null && break
+          Fn::Base64:
+            Fn::Sub: |
+              #!/bin/bash
+              echo "hello debug"
+              exec >>/var/log/wordpress-install.log 2>&1
+              set +e
+              R=$(curl -s http://169.254.169.254/latest/meta-data/placement/region)
+              I=$(curl -s http://169.254.169.254/latest/meta-data/instance-id)
               sleep 5
-            done
-            [ ! -f wp-config.php ] && [ -f wp-config-sample.php ] && cp wp-config-sample.php wp-config.php
-            [ ! -f wp-config.php ] && exit 1
-            PE=$$(printf '%s\n' "$$PW" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g' | sed 's/#/\\#/g')
-            sed -i "s#database_name_here#wordpress#g; s#username_here#wordpress#g; s#password_here#$$PE#g; s#localhost#$$H#g" wp-config.php
-            L=""
-            for i in {1..8}; do
-              [ -n "$$S" ] && [ "$$S" != "None" ] && L=$$(aws cloudformation describe-stacks --stack-name "$$S" --region $$R --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" --output text 2>/dev/null || echo "")
-              [ -z "$$L" ] || [ "$$L" == "None" ] && L=$$(aws elbv2 describe-load-balancers --region $$R --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].DNSName' --output text 2>/dev/null | head -1 || echo "")
-              [ -n "$$L" ] && [ "$$L" != "None" ] && [ "$$L" != "null" ] && break
-              sleep 10
-            done
-            [ -n "$$L" ] && [ "$$L" != "None" ] && [ "$$L" != "null" ] && ! grep -q "define.*WP_HOME" wp-config.php && echo "" >> wp-config.php && echo "define('WP_HOME', 'http://$$L');" >> wp-config.php && echo "define('WP_SITEURL', 'http://$$L');" >> wp-config.php
-            chown -R apache:apache /var/www/html && chmod -R 755 /var/www/html && chmod 644 wp-config.php
-            if [ $$PR -eq 0 ]; then
-              [ ! -f /usr/local/bin/wp ] && curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
-              sleep 10
-              U="${WordPressAdminUser}"
-              E="${WordPressAdminEmail}"
-              sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$$U" --admin_password="$$PW" --admin_email="$$E" --skip-email --allow-root || true
-              systemctl restart httpd && systemctl enable httpd
-            else
-              systemctl is-active --quiet httpd && systemctl reload httpd || true
-            fi
-            curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 644 /var/www/html/hostname.php || true
+              S=$(aws ec2 describe-instances --instance-ids "$I" --region $R --query 'Reservations[0].Instances[0].Tags[?Key==`aws:cloudformation:stack-name`].Value' --output text 2>/dev/null || echo "")
+              PR=0
+              [ -n "$S" ] && [ "$S" != "None" ] && E=$(aws cloudformation describe-stacks --stack-name "$S" --region $R --query 'Stacks[0].Parameters[?ParameterKey==`Environment`].ParameterValue' --output text 2>/dev/null || echo "") && ([ "$E" == "Production" ] || [[ "$S" == *"prod"* ]] || [[ "$S" == *"Prod"* ]] || [[ "$S" == *"PROD"* ]]) && PR=1
+              if [ $PR -eq 0 ]; then
+                yum update -y
+                amazon-linux-extras list | grep -q php8.2 && amazon-linux-extras install php8.2 -y || amazon-linux-extras list | grep -q php8.1 && amazon-linux-extras install php8.1 -y || amazon-linux-extras list | grep -q php8.0 && amazon-linux-extras install php8.0 -y || (yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm https://rpms.remirepo.net/enterprise/remi-release-7.rpm && (yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80))
+                yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip && systemctl start httpd && systemctl enable httpd
+                cd /var/www/html && wget -q https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && mv wordpress/* . && rm -rf wordpress latest.tar.gz
+              else
+                cd /var/www/html
+              fi
+              D="wordpress-db"
+              if [ $PR -eq 1 ]; then
+                D="Production-wordpress-db"
+              elif [[ "$S" == *"dev"* ]] || [[ "$S" == *"Dev"* ]] || [[ "$S" == *"DEV"* ]]; then
+                D="Development-wordpress-db"
+              fi
+              H=""
+              for i in {1..15}; do
+                H=$(aws rds describe-db-instances --db-instance-identifier "$D" --query 'DBInstances[0].Endpoint.Address' --output text --region $R 2>/dev/null || echo "")
+                [ -n "$H" ] && [ "$H" != "None" ] && [ "$H" != "null" ] && break
+                sleep 10
+              done
+              ([ -z "$H" ] || [ "$H" == "None" ]) && exit 1
+              PW="${WordPressAdminPassword}"
+              [ -z "$PW" ] && exit 1
+              for i in {1..15}; do
+                mysql -h "$H" -u wordpress -p"$PW" -e "SELECT 1" 2>/dev/null && break
+                sleep 5
+              done
+              [ ! -f wp-config.php ] && [ -f wp-config-sample.php ] && cp wp-config-sample.php wp-config.php
+              [ ! -f wp-config.php ] && exit 1
+              PE=$(printf '%s\n' "$PW" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g' | sed 's/#/\\#/g')
+              sed -i "s#database_name_here#wordpress#g; s#username_here#wordpress#g; s#password_here#$PE#g; s#localhost#$H#g" wp-config.php
+              L=""
+              for i in {1..8}; do
+                [ -n "$S" ] && [ "$S" != "None" ] && L=$(aws cloudformation describe-stacks --stack-name "$S" --region $R --query "Stacks[0].Outputs[?OutputKey=='LoadBalancerDNS'].OutputValue" --output text 2>/dev/null || echo "")
+                [ -z "$L" ] || [ "$L" == "None" ] && L=$(aws elbv2 describe-load-balancers --region $R --query 'LoadBalancers[?contains(LoadBalancerName, `WP-LB`)].DNSName' --output text 2>/dev/null | head -1 || echo "")
+                [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ] && break
+                sleep 10
+              done
+              [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ] && ! grep -q "define.*WP_HOME" wp-config.php && echo "" >> wp-config.php && echo "define('WP_HOME', 'http://$L');" >> wp-config.php && echo "define('WP_SITEURL', 'http://$L');" >> wp-config.php
+              chown -R apache:apache /var/www/html && chmod -R 755 /var/www/html && chmod 644 wp-config.php
+              if [ $PR -eq 0 ]; then
+                [ ! -f /usr/local/bin/wp ] && curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
+                sleep 10
+                U="${WordPressAdminUser}"
+                E="${WordPressAdminEmail}"
+                sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$U" --admin_password="$PW" --admin_email="$E" --skip-email --allow-root || true
+                systemctl restart httpd && systemctl enable httpd
+              else
+                systemctl is-active --quiet httpd && systemctl reload httpd || true
+              fi
+              curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 644 /var/www/html/hostname.php || true
 
   # RDS Database for WordPress
   WordPressDBSubnetGroup:
