@@ -1,6 +1,11 @@
 <?php
 header('Content-Type: text/html; charset=utf-8');
 $hostname = gethostname();
+$stack_name = '';
+$stack_file = '/var/www/html/stack.txt';
+if (file_exists($stack_file)) {
+    $stack_name = trim(file_get_contents($stack_file));
+}
 ?>
 <!DOCTYPE html>
 <html>
@@ -27,6 +32,16 @@ $hostname = gethostname();
             color: #333;
             margin-bottom: 20px;
         }
+        .stack-name {
+            font-size: 20px;
+            color: #666;
+            font-weight: bold;
+            padding: 15px;
+            background-color: #e8f4f8;
+            border-radius: 4px;
+            display: inline-block;
+            margin-bottom: 20px;
+        }
         .hostname {
             font-size: 24px;
             color: #0073aa;
@@ -41,6 +56,9 @@ $hostname = gethostname();
 <body>
     <div class="container">
         <h1>Server Hostname</h1>
+        <?php if (!empty($stack_name)): ?>
+        <div class="stack-name">Stack: <?php echo htmlspecialchars($stack_name); ?></div>
+        <?php endif; ?>
         <div class="hostname"><?php echo htmlspecialchars($hostname); ?></div>
     </div>
 </body>
