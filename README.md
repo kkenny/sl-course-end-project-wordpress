@@ -370,6 +370,32 @@ aws cloudformation delete-stack --stack-name wordpress-stack
   - Setting up automated backups
   - Using Multi-AZ RDS for high availability
 
+## Testing
+
+This repository includes a test suite using [bats-core](https://github.com/bats-core/bats-core) for unit testing bash scripts.
+
+### Quick Start
+
+1. **Install testing dependencies:**
+   ```bash
+   ./setup-bats.sh
+   ```
+
+2. **Run tests:**
+   ```bash
+   ./run-tests.sh
+   ```
+
+### Test Coverage
+
+The test suite covers functions in `_common.sh`:
+- Password generation (`generate_password`)
+- Input validation functions
+- Template update functions (`update_template_ami`)
+- Error handling
+
+For detailed testing documentation, see [TESTING.md](TESTING.md).
+
 ## Support
 
 For issues or questions:
