@@ -91,98 +91,25 @@ This repository contains a complete solution for deploying and managing **two se
    ```
    The `_set_profile.sh` file will be automatically sourced by deployment scripts to set your AWS credentials.
 4. **EC2 Key Pair** created in your AWS region
+    - If needed, you can create a new keypair with `utils/create-key-pair.sh`
+    ```bash
+    utils/create-key-pair.sh -k wordpress-project
+    ```
+    - This will create the key-pair and store the newly generated private key to `./wordpress-project.pem`
+    - You can use this keypair to ssh to EC2 instances: `ssh -i wordpress-project.pem ec2-user@ip`
 5. **Basic knowledge** of AWS services (EC2, CloudFormation, Auto Scaling)
 
 ## Quick Start Guide
 
-### Step 1: Deploy the Production Environment (24/7)
+For detailed step-by-step deployment instructions, please refer to [QUICK_START.md](QUICK_START.md).
 
-Deploy the production environment for your live blog:
-
-```bash
-./deploy-prod.sh
-```
-
-The script will:
-- Check AWS credentials
-- Find the latest Amazon Linux 2 AMI for your region
-- Prompt for required parameters:
-  - EC2 Key Pair Name
-  - WordPress Admin Password (min 8 characters)
-  - WordPress Admin Email
-  - WordPress Admin Username
-  - Instance Type (default: t3.medium)
-
-**Note:** Production environment runs 24/7 with no auto-shutdown.
-
-### Step 2: Deploy the Development Environment (Auto-Shutdown)
-
-Deploy the development environment for testing:
-
-```bash
-./deploy-dev.sh
-```
-
-The script will:
-- Check AWS credentials
-- Find the latest Amazon Linux 2 AMI for your region
-- Prompt for required parameters:
-  - EC2 Key Pair Name
-  - WordPress Admin Password (min 8 characters)
-  - WordPress Admin Email
-  - WordPress Admin Username
-  - Instance Type (default: t3.micro)
-  - Business Hours Start (default: 09:00 UTC)
-  - Business Hours End (default: 18:00 UTC)
-
-**Note:** Development environment automatically shuts down outside business hours.
-
-**Deployment takes approximately 15-20 minutes per environment.**
-
-### Step 3: Access WordPress
-
-After deployment completes for each environment:
-1. Wait 2-3 minutes for WordPress installation to finish
-2. Access the WordPress URL from the stack outputs
-3. Complete the WordPress setup wizard
-
-**Production URL:** Available 24/7  
-**Development URL:** Available during business hours only (auto-starts/stops)
-
-### Step 4: Create an AMI of the WordPress Instance
-
-Once your WordPress instance is configured and ready, create an AMI:
-
-**For Production:**
-```bash
-STACK_NAME=wordpress-prod ./create-ami.sh
-```
-
-**For Development:**
-```bash
-STACK_NAME=wordpress-dev ./create-ami.sh
-```
-
-Or use the default (development):
-```bash
-./create-ami.sh
-```
-
-This script will:
-- Automatically detect the environment from stack name
-- Find the WordPress instance from the Auto Scaling Group
-- Create an AMI (takes 10-15 minutes)
-- Save the AMI ID to `.ami-id.txt` for reference
-
-### Step 5: Update Launch Template with AMI
-
-After the AMI is created, update the Launch Template to use it:
-
-```bash
-./update-launch-template-with-ami.sh
-```
-
-This ensures that any new instances launched by Auto Scaling will use your custom AMI.
+The Quick Start Guide includes:
+- Prerequisites checklist
+- Step-by-step deployment instructions for both production and development environments
+- AMI creation and Launch Template updates
+- Verification steps
+- Troubleshooting tips
+- Cost estimates
 
 ## Task Completion
 

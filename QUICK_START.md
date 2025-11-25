@@ -1,5 +1,24 @@
 # Quick Start Guide
 
+## TLDR
+
+**Quick deployment workflow:**
+1. Configure AWS credentials (`_set_profile.sh`)
+2. Create EC2 Key Pair (`utils/create-key-pair.sh -k wordpress-project`)
+3. Deploy dev environment (`./deploy-dev.sh`)
+4. Configure WordPress in dev
+5. Create AMI from dev (`./create-ami.sh`)
+6. Deploy production using the AMI (`./deploy-prod.sh`)
+
+**Key commands:**
+- Check stack status: `utils/check-stack-status.sh -s wordpress-dev`
+- Troubleshoot WordPress: `utils/troubleshoot-wordpress.sh -s wordpress-dev`
+- Delete stack: `./destroy-stack.sh -s wordpress-dev`
+
+**Time estimate:** ~45-60 minutes total (15-20 min per deployment + 10-15 min for AMI creation)
+
+---
+
 ## Prerequisites Checklist
 
 - [ ] AWS Account with admin/appropriate permissions
@@ -15,6 +34,14 @@
 - [ ] Sufficient AWS service limits (VPCs, EC2 instances, RDS instances)
 
 ## Step-by-Step Deployment
+
+**Workflow Overview:**
+1. Deploy development environment first for testing
+2. Configure WordPress in development
+3. Create an AMI from the configured development environment
+4. Deploy production environment using the AMI from development
+
+This workflow ensures that production uses a tested and configured WordPress instance.
 
 ### 1. Clone and Navigate
 ```bash
@@ -32,30 +59,31 @@ cp _set_profile_example.sh _set_profile.sh
 # - AWS_DEFAULT_REGION: Your target AWS region (e.g., us-east-1, us-east-2)
 ```
 
-**Note:** The `_set_profile.sh` file is automatically sourced by all deployment scripts. If you prefer to use `aws configure` instead, you can skip this step.
+**Note:** The `_set_profile.sh` file is automatically sourced by all deployment scripts to make this more portable and not overwrite any other AWS configuration you may already have set. If you prefer to use `aws configure` instead, you can skip this step.
 
 ### 3. Make Scripts Executable (if needed)
 ```bash
 chmod +x *.sh
 ```
 
-### 4. Deploy Production Environment (24/7)
+### 4. Create EC2 Key Pair (if needed)
+If you don't already have an EC2 Key Pair in your target AWS region, create one:
+
 ```bash
-./deploy-prod.sh
+utils/create-key-pair.sh -k wordpress-project
 ```
 
 **What to expect:**
-- Script will prompt for:
-  - EC2 Key Pair Name (must exist in your region)
-  - WordPress Admin Password (min 8 characters)
-  - WordPress Admin Email
-  - WordPress Admin Username (default: admin)
-  - Instance Type (default: t3.medium)
-- Deployment takes 15-20 minutes
-- Production environment runs 24/7 (no auto-shutdown)
-- You'll see stack outputs including WordPress URL
+- Creates a new EC2 Key Pair named `wordpress-project` in your AWS region
+- Saves the private key to `./wordpress-project.pem` in the current directory
+- **Important:** Keep the `.pem` file secure and never commit it to version control
+- You can use this key to SSH into EC2 instances: `ssh -i wordpress-project.pem ec2-user@<instance-ip>`
 
-### 4b. Deploy Development Environment (Auto-Shutdown)
+**Note:** If you already have a Key Pair in your region, you can skip this step and use your existing Key Pair name when prompted during deployment.
+
+### 5. Deploy Development Environment (Auto-Shutdown)
+Deploy the development environment first for testing and AMI creation:
+
 ```bash
 ./deploy-dev.sh
 ```
@@ -73,39 +101,63 @@ chmod +x *.sh
 - Development environment auto-shuts down outside business hours
 - You'll see stack outputs including WordPress URL
 
-### 5. Wait for WordPress Installation
+### 6. Wait for WordPress Installation
 After deployment completes, wait 3-5 minutes for WordPress to finish installing.
 
-### 6. Access WordPress
+### 7. Access and Configure WordPress (Development)
 1. Get the WordPress URL from stack outputs
 2. Open in browser
 3. Complete WordPress setup wizard
+4. Configure WordPress as needed (themes, plugins, content, etc.)
 
-### 7. Create AMI (Task 2)
-Once WordPress is configured:
+**Note:** Make sure WordPress is fully configured before creating the AMI, as the AMI will capture the current state of the instance.
 
-**For Production:**
-```bash
-STACK_NAME=wordpress-prod ./create-ami.sh
-```
+### 8. Create AMI from Development Environment (Task 2)
+Once WordPress is configured in the development environment, create an AMI:
 
-**For Development:**
 ```bash
 STACK_NAME=wordpress-dev ./create-ami.sh
 ```
 
-Or use default (development):
+Or use the default (development):
 ```bash
 ./create-ami.sh
 ```
-- Takes 10-15 minutes
-- AMI ID saved to `.ami-id.txt`
 
-### 8. Update Launch Template (Optional)
-To use the new AMI for future instances:
+**What to expect:**
+- Takes 10-15 minutes
+- AMI ID automatically saved to `.ami-id.txt`
+- This AMI will be used for the production deployment
+
+### 9. Deploy Production Environment (24/7)
+Deploy the production environment using the AMI created from development:
+
 ```bash
-./update-launch-template-with-ami.sh
+./deploy-prod.sh
 ```
+
+**What to expect:**
+- Script will automatically use the AMI ID from `.ami-id.txt` (created in step 7)
+- Script will prompt for:
+  - EC2 Key Pair Name (must exist in your region)
+  - WordPress Admin Password (min 8 characters)
+  - WordPress Admin Email
+  - WordPress Admin Username (default: admin)
+  - Instance Type (default: t3.medium)
+- Deployment takes 15-20 minutes
+- Production environment runs 24/7 (no auto-shutdown)
+- You'll see stack outputs including WordPress URL
+
+**Note:** The production environment will use the AMI created from your configured development environment, ensuring consistency between environments.
+
+### 10. Update Launch Template (Optional)
+To use the new AMI for future instances in the production Auto Scaling Group:
+
+```bash
+STACK_NAME=wordpress-prod ./update-launch-template-with-ami.sh
+```
+
+This ensures that any new instances launched by Auto Scaling will use your custom AMI.
 
 ## Verification
 
@@ -146,14 +198,14 @@ aws logs tail /aws/lambda/Development-WordPressAutoShutdown --follow
 ## Task Verification
 
 ### ✅ Task 1: CloudFormation Stack
-- **Production Stack:** Deployed successfully (24/7)
 - **Development Stack:** Deployed successfully (auto-shutdown)
+- **Production Stack:** Deployed successfully (24/7) using AMI from development
 - All resources created
-- Check: `aws cloudformation describe-stacks --stack-name wordpress-prod` or `wordpress-dev`
+- Check: `aws cloudformation describe-stacks --stack-name wordpress-dev` or `wordpress-prod`
 
 ### ✅ Task 2: AMI Creation
-- AMI created from WordPress instance
-- Works for both production and development environments
+- AMI created from development WordPress instance
+- AMI used for production deployment
 - Check: `aws ec2 describe-images --image-ids $(cat .ami-id.txt)`
 
 ### ✅ Task 3: Auto Scaling
@@ -176,10 +228,17 @@ aws logs tail /aws/lambda/Development-WordPressAutoShutdown --follow
 4. Ensure Key Pair exists
 
 ### Can't Access WordPress
-1. Wait 5-10 minutes after stack creation
-2. Check security group allows HTTP (port 80)
-3. Verify instance is running
-4. Check Load Balancer health
+1. Check stack status using the utility script:
+   ```bash
+   utils/check-stack-status.sh -s wordpress-dev
+   # or for production:
+   utils/check-stack-status.sh -s wordpress-prod
+   ```
+   This will show stack status, failed resources, and recent events.
+2. Wait 5-10 minutes after stack creation
+3. Check security group allows HTTP (port 80)
+4. Verify instance is running
+5. Check Load Balancer health
 
 ### AMI Creation Fails
 1. Ensure instance is running
@@ -188,33 +247,30 @@ aws logs tail /aws/lambda/Development-WordPressAutoShutdown --follow
 
 ## Cleanup
 
-To delete production environment:
+To delete stacks, use the `destroy-stack.sh` script:
+
+**To delete production environment:**
 ```bash
-aws cloudformation delete-stack --stack-name wordpress-prod
-aws cloudformation wait stack-delete-complete --stack-name wordpress-prod
+./destroy-stack.sh -s wordpress-prod
 ```
 
-To delete development environment:
+**To delete development environment:**
 ```bash
-aws cloudformation delete-stack --stack-name wordpress-dev
-aws cloudformation wait stack-delete-complete --stack-name wordpress-dev
+./destroy-stack.sh -s wordpress-dev
 ```
 
-## Cost Estimate
+Or use the default (development):
+```bash
+./destroy-stack.sh
+```
 
-**Free Tier Eligible:**
-- t3.micro EC2 instance
-- db.t3.micro RDS instance
-- Lambda (1M requests/month free)
+**What to expect:**
+- Script checks AWS credentials
+- Verifies the stack exists
+- Deletes the CloudFormation stack
+- Waits for deletion to complete (can take 10-15 minutes)
+- Shows stack status and events if deletion fails
 
-**Estimated Monthly Cost (outside free tier):**
-- t3.medium EC2: ~$30/month
-- db.t3.micro RDS: ~$15/month
-- Load Balancer: ~$16/month
-- Data transfer: varies
-- **Total: ~$60-80/month** (with auto-shutdown reducing costs)
+**Note:** Stack deletion will remove all resources created by the stack, including EC2 instances, RDS databases, Load Balancers, and other AWS resources. Make sure you have backups of any important data before deleting stacks.
 
-**Cost Savings:**
-- Auto-shutdown feature stops instances outside business hours
-- Reduces EC2 costs by ~50% if only running 9 hours/day
 

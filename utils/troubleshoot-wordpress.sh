@@ -8,17 +8,75 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source common functions
-source "${SCRIPT_DIR}/_common.sh"
+source "${SCRIPT_DIR}/../_common.sh"
+
+# Initialize variables for command-line arguments
+STACK_NAME=""
+REGION=""
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--stack-name)
+            STACK_NAME="$2"
+            shift 2
+            ;;
+        -r|--region)
+            REGION="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-r|--region REGION]"
+            echo ""
+            echo "Options:"
+            echo "  -s, --stack-name    CloudFormation stack name (default: wordpress-dev)"
+            echo "  -r, --region        AWS region (default: from AWS_REGION env or us-east-1)"
+            echo "  -h, --help          Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0 -s wordpress-dev"
+            echo "  $0 -s wordpress-prod -r us-west-2"
+            echo "  $0 wordpress-dev  # Legacy positional argument support"
+            exit 0
+            ;;
+        *)
+            # Support legacy positional argument for backward compatibility
+            if [ -z "$STACK_NAME" ]; then
+                STACK_NAME="$1"
+            else
+                echo -e "${RED}Unknown option: $1${NC}"
+                echo "Use -h or --help for usage information"
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
 
 # Configuration
-STACK_NAME="${1:-wordpress-dev}"
-REGION="${AWS_REGION:-us-east-1}"
+STACK_NAME="${STACK_NAME:-wordpress-dev}"
+REGION="${REGION:-${AWS_REGION:-us-east-1}}"
 
 echo -e "${BLUE}WordPress Troubleshooting${NC}"
 echo "=========================="
-echo "Stack Name: $STACK_NAME"
-echo "Region: $REGION"
+echo -e "${YELLOW}Stack Name: $STACK_NAME${NC}"
+echo -e "${YELLOW}Region: $REGION${NC}"
 echo ""
+
+# Check AWS credentials
+echo -e "${YELLOW}Checking AWS credentials...${NC}"
+if ! check_aws_credentials; then
+    exit 1
+fi
+
+get_aws_account
+echo ""
+
+# Check if stack exists
+if ! check_stack_exists "$STACK_NAME" "$REGION"; then
+    echo -e "${RED}Stack '$STACK_NAME' not found in region '$REGION'${NC}"
+    exit 1
+fi
 
 # Get stack outputs
 echo -e "${YELLOW}Getting stack information...${NC}"
