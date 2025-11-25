@@ -279,19 +279,15 @@ Resources:
                 sleep 10
               done
               [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ] && ! grep -q "define.*WP_HOME" wp-config.php && echo "" >> wp-config.php && echo "define('WP_HOME', 'http://$L');" >> wp-config.php && echo "define('WP_SITEURL', 'http://$L');" >> wp-config.php
-              chown -R apache:apache /var/www/html && chmod -R 755 /var/www/html && chmod 644 wp-config.php
-              if [ $PR -eq 0 ]; then
-                [ ! -f /usr/local/bin/wp ] && curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
-                sleep 10
-                U="${WordPressAdminUser}"
-                E="${WordPressAdminEmail}"
-                sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$U" --admin_password="$PW" --admin_email="$E" --skip-email --allow-root || true
-                systemctl restart httpd && systemctl enable httpd
-              else
-                systemctl is-active --quiet httpd && systemctl reload httpd || true
-              fi
-              mkdir -p /var/www/html && echo "$S" > /var/www/html/stack.txt
+              [ ! -f /usr/local/bin/wp ] && curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
+              sleep 10
+              U="${WordPressAdminUser}"
+              E="${WordPressAdminEmail}"
+              sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$U" --admin_password="$PW" --admin_email="$E" --skip-email --allow-root || true
+              systemctl restart httpd && systemctl enable httpd
+              echo "$S" > /var/www/html/stack.txt
               curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 755 /var/www/html/hostname.php || true
+              chown -R apache:apache /var/www/html && chmod -R 755 /var/www/html && chmod 644 wp-config.php
 
   # RDS Database for WordPress
   WordPressDBSubnetGroup:
