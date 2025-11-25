@@ -388,11 +388,11 @@ This repository includes a test suite using [bats-core](https://github.com/bats-
 
 ### Test Coverage
 
-The test suite covers functions in `_common.sh`:
-- Password generation (`generate_password`)
-- Input validation functions
-- Template update functions (`update_template_ami`)
-- Error handling
+The test suite covers:
+- Core functions in `_common.sh` (password generation, AWS operations, validation)
+- Script argument parsing for all deployment and utility scripts
+- AWS CLI mocking for testing without real AWS credentials
+- Error handling and edge cases
 
 For detailed testing documentation, see [TESTING.md](TESTING.md).
 

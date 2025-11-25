@@ -46,9 +46,67 @@ fi
 echo -e "${YELLOW}Running tests...${NC}"
 echo ""
 
-"$BATS_BIN" $TEST_FILES
+# Track overall exit code
+OVERALL_EXIT=0
+FIRST_FILE=true
 
-EXIT_CODE=$?
+# Process each test file separately to track filenames
+for test_file in $TEST_FILES; do
+    # Skip if file doesn't exist (e.g., from glob expansion)
+    [ ! -f "$test_file" ] && continue
+    
+    # Extract just the filename
+    filename=$(basename "$test_file")
+    
+    # Print file header (with blank line before if not first file)
+    if [ "$FIRST_FILE" = false ]; then
+        echo ""
+    fi
+    echo "$filename"
+    echo ""
+    FIRST_FILE=false
+    
+    # Run tests for this file and format output
+    "$BATS_BIN" "$test_file" | awk -v green="${GREEN}" -v red="${RED}" -v nc="${NC}" '
+    BEGIN {
+        test_num = 0
+    }
+    /^1\.\./ {
+        # Skip the TAP plan line
+        next
+    }
+    /^ok [0-9]+/ {
+        test_num++
+        # Extract test name (everything after "ok N ")
+        test_name = $0
+        sub(/^ok [0-9]+ /, "", test_name)
+        # Print test with number and green checkmark
+        printf " %s✓ %d. %s%s\n", green, test_num, test_name, nc
+        next
+    }
+    /^not ok [0-9]+/ {
+        test_num++
+        # Extract test name
+        test_name = $0
+        sub(/^not ok [0-9]+ /, "", test_name)
+        # Print test with number and red X
+        printf " %s✗ %d. %s%s\n", red, test_num, test_name, nc
+        next
+    }
+    {
+        # Print other lines as-is (like error messages)
+        print
+    }
+    '
+    
+    # Capture exit code from this test file
+    FILE_EXIT=${PIPESTATUS[0]}
+    if [ $FILE_EXIT -ne 0 ]; then
+        OVERALL_EXIT=$FILE_EXIT
+    fi
+done
+
+EXIT_CODE=$OVERALL_EXIT
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then

@@ -46,8 +46,12 @@ Tests are located in the `tests/` directory:
 
 ```
 tests/
-├── test_common.bats                    # Tests for _common.sh functions
-└── test_common_update_template.bats     # Tests for template update functions
+├── test_common.bats                          # Tests for _common.sh functions
+├── test_common_update_template.bats           # Tests for template update functions
+├── test_common_get_latest_ami.bats           # Tests for get_latest_ami() with AWS mocking
+├── test_common_get_aws_account.bats           # Tests for get_aws_account() success/failure
+├── test_common_validate_key_pair.bats        # Enhanced tests for validate_key_pair()
+└── test_script_args.bats                     # Tests for script argument parsing
 ```
 
 ## Writing Tests
@@ -129,12 +133,22 @@ To mock AWS CLI commands or other external dependencies, you can override functi
 
 Current test coverage includes:
 
-- ✅ `generate_password()` - Password generation and validation
-- ✅ `validate_key_pair()` - Input validation
+### Core Functions (`_common.sh`)
+- ✅ `generate_password()` - Password generation and validation (length, character requirements)
+- ✅ `validate_key_pair()` - Input validation and AWS CLI mocking (success/failure cases)
 - ✅ `check_aws_credentials()` - Function structure
 - ✅ `check_stack_exists()` - Input validation
 - ✅ `get_stack_status()` - Input validation
+- ✅ `get_latest_ami()` - AWS CLI mocking (success, failure, default AMI)
+- ✅ `get_aws_account()` - Success and failure cases with AWS CLI mocking
 - ✅ `update_template_ami()` - File operations and AMI replacement
+
+### Script Argument Parsing
+- ✅ `deploy-prod.sh` - All argument options and help message
+- ✅ `deploy-dev.sh` - Help message
+- ✅ `destroy-stack.sh` - Argument parsing
+- ✅ `utils/check-stack-status.sh` - Argument parsing
+- ✅ `utils/troubleshoot-wordpress.sh` - Argument parsing
 
 ## Continuous Integration
 
