@@ -1,7 +1,7 @@
-[![Integration Tests](https://img.shields.io/badge/integration%20tests-passing-brightgreen)](tests/integration)
+[![Integration Tests](https://img.shields.io/badge/integration%20tests-failing-red)](tests/integration)
 [![Unit Tests](https://img.shields.io/badge/unit%20tests-passing-brightgreen)](tests/unit)
 [![Performance Tests](https://img.shields.io/badge/performance%20tests-passing-brightgreen)](tests/performance)
-<!-- Tests last run: 2025-11-26 03:11:34 UTC -->
+<!-- Tests last run: 2025-11-26 03:32:00 UTC -->
 
 # SimpliLearn Course End Project: Set Up and Monitor a WordPress Instance
 
