@@ -219,7 +219,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
       LaunchTemplateData:
-        ImageId: ami-0979de60fed46582f  # Amazon Linux 2 AMI (update with your region's AMI)
+        ImageId: ami-06555f4e4691a8faf  # Amazon Linux 2 AMI (update with your region's AMI)
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:
@@ -247,6 +247,15 @@ Resources:
                 cd /var/www/html && wget -q https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && mv wordpress/* . && rm -rf wordpress latest.tar.gz
               else
                 cd /var/www/html
+                # For production, check if WordPress is already installed (from AMI)
+                # If not, install it (AMI might not have WordPress pre-installed)
+                if [ ! -f wp-config-sample.php ] && [ ! -f index.php ]; then
+                  echo "WordPress not found in AMI, installing..."
+                  yum update -y
+                  amazon-linux-extras list | grep -q php8.2 && amazon-linux-extras install php8.2 -y || amazon-linux-extras list | grep -q php8.1 && amazon-linux-extras install php8.1 -y || amazon-linux-extras list | grep -q php8.0 && amazon-linux-extras install php8.0 -y || (yum install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm https://rpms.remirepo.net/enterprise/remi-release-7.rpm && (yum-config-manager --enable remi-php82 || yum-config-manager --enable remi-php81 || yum-config-manager --enable remi-php80))
+                  yum install -y httpd php-cli php-common php-fpm php-json php-mbstring php-xml php-mysqlnd php-gd php-opcache php-zip mysql wget unzip && systemctl start httpd && systemctl enable httpd
+                  wget -q https://wordpress.org/latest.tar.gz && tar -xzf latest.tar.gz && mv wordpress/* . && rm -rf wordpress latest.tar.gz
+                fi
               fi
               D="wordpress-db"
               if [ $PR -eq 1 ]; then
@@ -267,8 +276,16 @@ Resources:
                 mysql -h "$H" -u wordpress -p"$PW" -e "SELECT 1" 2>/dev/null && break
                 sleep 5
               done
+              # Check if WordPress files exist
+              if [ ! -f wp-config-sample.php ] && [ ! -f index.php ]; then
+                echo "ERROR: WordPress files not found in /var/www/html" >&2
+                exit 1
+              fi
               [ ! -f wp-config.php ] && [ -f wp-config-sample.php ] && cp wp-config-sample.php wp-config.php
-              [ ! -f wp-config.php ] && exit 1
+              if [ ! -f wp-config.php ]; then
+                echo "ERROR: Failed to create wp-config.php from wp-config-sample.php" >&2
+                exit 1
+              fi
               PE=$(printf '%s\n' "$PW" | sed 's/\\/\\\\/g' | sed 's/&/\\&/g' | sed 's/#/\\#/g')
               sed -i "s#database_name_here#wordpress#g; s#username_here#wordpress#g; s#password_here#$PE#g; s#localhost#$H#g" wp-config.php
               L=""
