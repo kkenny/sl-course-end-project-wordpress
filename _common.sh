@@ -192,12 +192,14 @@ update_template_ami() {
     fi
     
     # Replace any AMI ID pattern in the template
+    # Match both real AMI IDs (17 hex chars) and placeholder values (like ami-12345678)
+    # Use a more flexible pattern that matches ami- followed by 8 or more hex characters
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS
-        sed -i '' "s/ami-[0-9a-f]\{17\}/$ami_id/g" "$template_file"
+        # macOS - replace any ami- followed by 8+ hex characters
+        sed -i '' "s/ami-[0-9a-f]\{8,\}/$ami_id/g" "$template_file"
     else
-        # Linux
-        sed -i "s/ami-[0-9a-f]\{17\}/$ami_id/g" "$template_file"
+        # Linux - replace any ami- followed by 8+ hex characters
+        sed -i "s/ami-[0-9a-f]\{8,\}/$ami_id/g" "$template_file"
     fi
 }
 
@@ -213,7 +215,7 @@ auto_select_key_pair() {
     if [ -z "$key_pairs" ]; then
         echo -e "${RED}Error: No Key Pairs found in region '$region'${NC}" >&2
         echo -e "${YELLOW}Please create a Key Pair first using:${NC}" >&2
-        echo "  ./create-key-pair.sh -k <key-name> -r $region" >&2
+        echo "  ./utils/create-key-pair.sh -k <key-name> -r $region" >&2
         return 1
     fi
     

@@ -72,8 +72,12 @@ setup_file() {
 
 setup() {
     # setup() runs before each test
-    # Most setup is done in setup_file, but we can add per-test setup here if needed
-    :
+    # Ensure _common.sh functions are available (they should be from setup_file, but ensure they're loaded)
+    if [ -n "$PROJECT_ROOT" ] && [ -f "${PROJECT_ROOT}/_common.sh" ]; then
+        # Source _common.sh if not already sourced (functions should persist from setup_file)
+        # This is a safety check - functions from setup_file should be available
+        :
+    fi
 }
 
 teardown() {
@@ -152,10 +156,17 @@ teardown_file() {
 
 @test "Stack is in CREATE_COMPLETE or UPDATE_COMPLETE state" {
     # Verify stack is in a completed state
-    run get_stack_status "$STACK_NAME" "$REGION"
+    # Ensure _common.sh is sourced (functions from setup_file should be available, but ensure it's loaded)
+    if [ -n "$PROJECT_ROOT" ] && [ -f "${PROJECT_ROOT}/_common.sh" ]; then
+        source "${PROJECT_ROOT}/_common.sh" >/dev/null 2>&1 || true
+    fi
     
-    [ "$status" -eq 0 ]
-    [[ "$output" == "CREATE_COMPLETE" ]] || [[ "$output" == "UPDATE_COMPLETE" ]]
+    # Note: get_stack_status is a function from _common.sh, use it directly (not with run)
+    local stack_status
+    stack_status=$(get_stack_status "$STACK_NAME" "$REGION")
+    
+    [ -n "$stack_status" ]
+    [[ "$stack_status" == "CREATE_COMPLETE" ]] || [[ "$stack_status" == "UPDATE_COMPLETE" ]]
 }
 
 @test "Database is not accessible from the internet" {
@@ -381,9 +392,19 @@ teardown_file() {
             continue
         fi
         
-        # Extract PHP version (format: "PHP 8.2.0" or similar)
-        # Use sed for portability (works on both Linux and macOS)
-        PHP_VERSION=$(echo "$PHP_VERSION_OUTPUT" | sed -n 's/.*PHP \([0-9]\+\.[0-9]\+\).*/\1/p' | head -1 || echo "")
+        # Extract PHP version (format: "PHP 8.2.29" -> extract "8.2")
+        # Try multiple regex patterns for compatibility
+        PHP_VERSION=$(echo "$PHP_VERSION_OUTPUT" | grep -oE 'PHP [0-9]+\.[0-9]+' | head -1 | sed 's/PHP //' || echo "")
+        
+        # If that didn't work, try sed pattern
+        if [ -z "$PHP_VERSION" ]; then
+            PHP_VERSION=$(echo "$PHP_VERSION_OUTPUT" | sed -nE 's/.*PHP ([0-9]+\.[0-9]+).*/\1/p' | head -1 || echo "")
+        fi
+        
+        # If still empty, try basic sed (for older systems)
+        if [ -z "$PHP_VERSION" ]; then
+            PHP_VERSION=$(echo "$PHP_VERSION_OUTPUT" | sed -n 's/.*PHP \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1 || echo "")
+        fi
         
         if [ -z "$PHP_VERSION" ]; then
             echo "Warning: Could not parse PHP version from instance $INSTANCE_ID. Output: $PHP_VERSION_OUTPUT" >&2

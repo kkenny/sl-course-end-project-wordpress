@@ -20,12 +20,54 @@ setup() {
     MOCK_AWS_DIR="${BATS_TMPDIR}/mock_aws"
     mkdir -p "$MOCK_AWS_DIR"
     export PATH="${MOCK_AWS_DIR}:$PATH" # Prepend mock dir to PATH
+    
+    # Track test keys created during tests (for cleanup)
+    export TEST_KEY_PAIRS_CREATED="${BATS_TMPDIR}/test_key_pairs_created.txt"
+    touch "$TEST_KEY_PAIRS_CREATED"
 }
 
 teardown() {
     # Restore _set_profile.sh if it was backed up
     if [ -f "${PROJECT_ROOT}/_set_profile.sh.bak" ]; then
         mv "${PROJECT_ROOT}/_set_profile.sh.bak" "${PROJECT_ROOT}/_set_profile.sh" 2>/dev/null || true
+    fi
+    
+    # Clean up test key pairs if they were created
+    if [ -f "$TEST_KEY_PAIRS_CREATED" ]; then
+        while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                # Format: KEY_NAME:REGION:PEM_FILE
+                KEY_NAME=$(echo "$line" | cut -d':' -f1)
+                REGION=$(echo "$line" | cut -d':' -f2)
+                PEM_FILE=$(echo "$line" | cut -d':' -f3)
+                
+                # Remove PEM file from filesystem
+                if [ -n "$PEM_FILE" ] && [ -f "$PEM_FILE" ]; then
+                    rm -f "$PEM_FILE" 2>/dev/null || true
+                fi
+                
+                # Delete key pair from AWS (only if AWS credentials are available)
+                if [ -n "$KEY_NAME" ] && [ -n "$REGION" ]; then
+                    # Check if we have real AWS credentials (not mocked)
+                    if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+                        # Temporarily remove mock from PATH to use real AWS CLI
+                        ORIGINAL_PATH="$PATH"
+                        # Remove mock directory from PATH (handle both beginning and middle positions)
+                        export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v "^${MOCK_AWS_DIR}$" | tr '\n' ':' | sed 's/:$//')
+                        
+                        # Delete the key pair from AWS
+                        /usr/bin/aws ec2 delete-key-pair \
+                            --key-name "$KEY_NAME" \
+                            --region "$REGION" \
+                            >/dev/null 2>&1 || true
+                        
+                        # Restore PATH
+                        export PATH="$ORIGINAL_PATH"
+                    fi
+                fi
+            fi
+        done < "$TEST_KEY_PAIRS_CREATED"
+        rm -f "$TEST_KEY_PAIRS_CREATED" 2>/dev/null || true
     fi
     
     # Clean up mock aws executable and restore PATH
@@ -110,5 +152,56 @@ EOF
     run auto_select_key_pair "us-east-1"
     [ "$status" -ne 0 ]
     [[ "$output" =~ "No Key Pairs found" ]]
+}
+
+@test "auto_select_key_pair works with real AWS credentials when available" {
+    # Skip if AWS credentials are not available
+    if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+        skip "AWS credentials not configured (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY required)"
+    fi
+    
+    # Temporarily remove mock from PATH to use real AWS CLI
+    ORIGINAL_PATH="$PATH"
+    # Remove mock directory from PATH (handle both beginning and middle positions)
+    export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v "^${MOCK_AWS_DIR}$" | tr '\n' ':' | sed 's/:$//')
+    
+    # Check if we can actually use AWS CLI
+    if ! /usr/bin/aws sts get-caller-identity >/dev/null 2>&1; then
+        export PATH="$ORIGINAL_PATH"
+        skip "AWS credentials are invalid or expired"
+    fi
+    
+    # Create a test key pair
+    TEST_KEY_NAME="test-auto-select-$(date +%s)"
+    TEST_REGION="${AWS_REGION:-us-east-1}"
+    TEST_PEM_FILE="${PROJECT_ROOT}/${TEST_KEY_NAME}.pem"
+    
+    # Create the key pair
+    if /usr/bin/aws ec2 create-key-pair \
+        --key-name "$TEST_KEY_NAME" \
+        --region "$TEST_REGION" \
+        --query 'KeyMaterial' \
+        --output text > "$TEST_PEM_FILE" 2>/dev/null; then
+        
+        chmod 400 "$TEST_PEM_FILE" 2>/dev/null || true
+        
+        # Track this key pair for cleanup
+        echo "${TEST_KEY_NAME}:${TEST_REGION}:${TEST_PEM_FILE}" >> "$TEST_KEY_PAIRS_CREATED"
+        
+        # Test that auto_select_key_pair can find it
+        # Note: auto_select_key_pair will use the real AWS CLI since we removed the mock from PATH
+        run auto_select_key_pair "$TEST_REGION"
+        [ "$status" -eq 0 ]
+        
+        # Verify the key pair name is in the output
+        echo "$output" | grep -q "$TEST_KEY_NAME"
+        [ $? -eq 0 ]
+    else
+        export PATH="$ORIGINAL_PATH"
+        skip "Failed to create test key pair (may not have permissions)"
+    fi
+    
+    # Restore PATH
+    export PATH="$ORIGINAL_PATH"
 }
 

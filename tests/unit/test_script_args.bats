@@ -36,21 +36,26 @@ teardown() {
 }
 
 @test "deploy-prod.sh rejects unknown option" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" --unknown-option
+    # Add timeout to prevent hanging (should exit immediately, but just in case)
+    run timeout 5 "${PROJECT_ROOT}/deploy-prod.sh" --unknown-option
     [ "$status" -ne 0 ]
     [[ "$output" =~ "Unknown option" ]]
 }
 
 @test "deploy-prod.sh accepts stack-name argument" {
     # This will fail later but should parse the argument correctly
-    run "${PROJECT_ROOT}/deploy-prod.sh" -s test-stack 2>&1 || true
+    # Provide -k to avoid key pair prompt, and pipe newlines for email and username prompts
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n\n' | ${PROJECT_ROOT}/deploy-prod.sh -s test-stack -k test-key 2>&1" || true
     # The script will fail because it needs AWS credentials, but argument parsing should work
     # We just check it doesn't fail with "Unknown option"
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
 @test "deploy-prod.sh accepts username argument" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" -u testuser 2>&1 || true
+    # Provide -k to avoid key pair prompt, and pipe newline for email prompt
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n' | ${PROJECT_ROOT}/deploy-prod.sh -u testuser -k test-key 2>&1" || true
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
@@ -60,27 +65,37 @@ teardown() {
 }
 
 @test "deploy-prod.sh accepts key-pair argument" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" -k test-key 2>&1 || true
+    # Pipe newlines to satisfy read prompts for email and username
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n\n' | ${PROJECT_ROOT}/deploy-prod.sh -k test-key 2>&1" || true
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
 @test "deploy-prod.sh accepts region argument" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" -r us-west-2 2>&1 || true
+    # Provide -k to avoid key pair prompt, and pipe newlines for email and username prompts
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n\n' | ${PROJECT_ROOT}/deploy-prod.sh -r us-west-2 -k test-key 2>&1" || true
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
 @test "deploy-prod.sh accepts instance-type argument" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" -t t3.large 2>&1 || true
+    # Provide -k to avoid key pair prompt, and pipe newlines for email and username prompts
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n\n' | ${PROJECT_ROOT}/deploy-prod.sh -t t3.large -k test-key 2>&1" || true
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
 @test "deploy-prod.sh accepts ami-id argument" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" -a ami-12345678 2>&1 || true
+    # Provide -k to avoid key pair prompt, and pipe newlines for email and username prompts
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n\n' | ${PROJECT_ROOT}/deploy-prod.sh -a ami-12345678 -k test-key 2>&1" || true
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
 @test "deploy-prod.sh accepts prompt-password flag" {
-    run "${PROJECT_ROOT}/deploy-prod.sh" -p 2>&1 || true
+    # Provide -k to avoid key pair prompt, and pipe newlines for password, email, and username prompts
+    # Add timeout to prevent hanging on AWS CLI calls
+    run timeout 10 bash -c "echo -e '\n\n\n' | ${PROJECT_ROOT}/deploy-prod.sh -p -k test-key 2>&1" || true
     [[ ! "$output" =~ "Unknown option" ]] || [ "$status" -eq 0 ]
 }
 
