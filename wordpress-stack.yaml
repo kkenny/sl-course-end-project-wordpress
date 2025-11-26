@@ -50,10 +50,16 @@ Parameters:
     Type: String
     Default: '18:00'
     Description: Business hours end time (HH:MM in UTC) - Only used for Development environment
+  
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: Email address for CloudWatch alarm notifications (optional, leave empty to disable email notifications)
 
 Conditions:
   IsDevelopment: !Equals [!Ref Environment, 'Development']
   IsProduction: !Equals [!Ref Environment, 'Production']
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
 
 Resources:
   # VPC and Networking
@@ -557,6 +563,283 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt WordPressShutdownSchedule.Arn
 
+  # CloudWatch Monitoring Resources
+  
+  # SNS Topic for Alarm Notifications (optional)
+  AlarmNotificationTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlarmEmail
+    Properties:
+      TopicName: !Sub '${Environment}-WordPressAlarms'
+      DisplayName: WordPress Production Alarms
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+  # CloudWatch Alarms
+
+  # EC2 CPU Utilization Alarm (aggregated across ASG)
+  HighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-HighCPU'
+      AlarmDescription: Alert when average CPU utilization exceeds 80% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WordPressAutoScalingGroup
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # RDS CPU Utilization Alarm
+  HighRDSCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-RDS-HighCPU'
+      AlarmDescription: Alert when RDS CPU utilization exceeds 80% for 5 minutes
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref WordPressDatabase
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # RDS Connection Count Alarm
+  HighRDSConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-RDS-HighConnections'
+      AlarmDescription: Alert when RDS database connections exceed 80% of max connections
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 16  # db.t3.micro has ~20 max connections, 80% = 16
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref WordPressDatabase
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # ALB Unhealthy Target Count Alarm
+  ALBUnhealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-ALB-UnhealthyTargets'
+      AlarmDescription: Alert when unhealthy target count is greater than 0 for 2 minutes
+      MetricName: UnHealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt WordPressTargetGroup.TargetGroupFullName
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # ALB High Response Time Alarm
+  ALBHighResponseTimeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-ALB-HighResponseTime'
+      AlarmDescription: Alert when ALB average response time exceeds 2 seconds for 5 minutes
+      MetricName: TargetResponseTime
+      Namespace: AWS/ApplicationELB
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # ALB High 5xx Error Rate Alarm
+  ALBHigh5xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-ALB-High5xxErrors'
+      AlarmDescription: Alert when ALB 5xx error rate exceeds threshold for 5 minutes
+      MetricName: HTTPCode_Target_5XX_Count
+      Namespace: AWS/ApplicationELB
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 10  # Adjust based on expected traffic volume
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # Auto Scaling Group Capacity Alarm
+  ASGCapacityAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-ASG-CapacityIssue'
+      AlarmDescription: Alert when ASG desired capacity cannot be met
+      MetricName: GroupDesiredCapacity
+      Namespace: AWS/AutoScaling
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !If [IsProduction, 3, 1]
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: AutoScalingGroupName
+          Value: !Ref WordPressAutoScalingGroup
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # RDS Free Storage Space Alarm
+  RDSLowStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${Environment}-WordPress-RDS-LowStorage'
+      AlarmDescription: Alert when RDS free storage space is below 2GB
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 2147483648  # 2GB in bytes
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref WordPressDatabase
+      AlarmActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+      OKActions:
+        - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
+
+  # CloudWatch Dashboard
+  WordPressDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${Environment}-WordPress-Dashboard'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/EC2", "CPUUtilization", { "stat": "Average", "label": "EC2 CPU" } ],
+                  [ ".", "NetworkIn", { "stat": "Sum", "label": "Network In" } ],
+                  [ ".", "NetworkOut", { "stat": "Sum", "label": "Network Out" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "EC2 Metrics (Auto Scaling Group)",
+                "view": "timeSeries",
+                "stacked": false
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/RDS", "CPUUtilization", { "stat": "Average", "label": "RDS CPU" } ],
+                  [ ".", "DatabaseConnections", { "stat": "Average", "label": "Connections" } ],
+                  [ ".", "FreeStorageSpace", { "stat": "Average", "label": "Free Storage (MB)", "yAxis": "right" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "RDS Database Metrics",
+                "view": "timeSeries",
+                "stacked": false
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApplicationELB", "RequestCount", { "stat": "Sum", "label": "Requests" } ],
+                  [ ".", "TargetResponseTime", { "stat": "Average", "label": "Response Time (s)", "yAxis": "right" } ],
+                  [ ".", "HTTPCode_Target_2XX_Count", { "stat": "Sum", "label": "2xx" } ],
+                  [ ".", "HTTPCode_Target_4XX_Count", { "stat": "Sum", "label": "4xx" } ],
+                  [ ".", "HTTPCode_Target_5XX_Count", { "stat": "Sum", "label": "5xx" } ]
+                ],
+                "period": 300,
+                "stat": "Sum",
+                "region": "${AWS::Region}",
+                "title": "Load Balancer Metrics",
+                "view": "timeSeries",
+                "stacked": false
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/ApplicationELB", "HealthyHostCount", { "stat": "Average", "label": "Healthy" } ],
+                  [ ".", "UnHealthyHostCount", { "stat": "Average", "label": "Unhealthy" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Target Health",
+                "view": "timeSeries",
+                "stacked": false
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  [ "AWS/AutoScaling", "GroupDesiredCapacity", { "stat": "Average", "label": "Desired" } ],
+                  [ ".", "GroupInServiceInstances", { "stat": "Average", "label": "In Service" } ],
+                  [ ".", "GroupTotalInstances", { "stat": "Average", "label": "Total" } ]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Auto Scaling Group Capacity",
+                "view": "timeSeries",
+                "stacked": false
+              }
+            }
+          ]
+        }
+
 Outputs:
   VPCId:
     Description: VPC ID
@@ -585,4 +868,10 @@ Outputs:
     Value: !Ref WordPressAutoScalingGroup
     Export:
       Name: !Sub '${AWS::StackName}-AutoScalingGroupName'
+
+  CloudWatchDashboard:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${WordPressDashboard}'
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudWatchDashboard'
 

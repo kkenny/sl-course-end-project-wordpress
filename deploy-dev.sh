@@ -20,6 +20,7 @@ BUSINESS_START="17:00"
 BUSINESS_END="06:00"
 INSTANCE_TYPE="t3.micro"
 AMI_ID=""
+ALARM_EMAIL=""
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -64,8 +65,12 @@ while [[ $# -gt 0 ]]; do
             AMI_ID="$2"
             shift 2
             ;;
+        --alarm-email)
+            ALARM_EMAIL="$2"
+            shift 2
+            ;;
         -h|--help)
-            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-t|--instance-type TYPE] [-a|--ami-id AMI_ID] [--business-start HH:MM] [--business-end HH:MM] [-p|--prompt-password]"
+            echo "Usage: $0 [-s|--stack-name STACK_NAME] [-u|--username USERNAME] [-e|--email EMAIL] [-k|--key-pair KEY_PAIR] [-r|--region REGION] [-t|--instance-type TYPE] [-a|--ami-id AMI_ID] [--alarm-email EMAIL] [--business-start HH:MM] [--business-end HH:MM] [-p|--prompt-password]"
             echo ""
             echo "Options:"
             echo "  -s, --stack-name       Set the CloudFormation stack name (default: wordpress-dev)"
@@ -75,6 +80,7 @@ while [[ $# -gt 0 ]]; do
             echo "  -r, --region           Set the AWS region (default: from AWS_REGION env or us-east-1)"
             echo "  -t, --instance-type    Set the EC2 instance type (default: $INSTANCE_TYPE)"
             echo "  -a, --ami-id           Set the AMI ID to use (default: query AWS for latest)"
+            echo "  --alarm-email          Set email address for CloudWatch alarm notifications (optional)"
             echo "  --business-start       Business hours start time in UTC (HH:MM format, default: $BUSINESS_START)"
             echo "  --business-end         Business hours end time in UTC (HH:MM format, default: $BUSINESS_END)"
             echo "  -p, --prompt-password  Prompt for password (default: auto-generate and save to .creds-\${STACK_NAME})"
@@ -164,6 +170,19 @@ if [ -z "$WP_USER" ]; then
     WP_USER=${WP_USER:-admin}
 else
     echo -e "${GREEN}WordPress Admin Username: $WP_USER (from command line)${NC}"
+fi
+
+# CloudWatch Alarm Email (optional)
+if [ -z "$ALARM_EMAIL" ]; then
+    read -p "CloudWatch Alarm Email (optional, press Enter to skip): " ALARM_EMAIL
+    ALARM_EMAIL=${ALARM_EMAIL:-}
+    if [ -n "$ALARM_EMAIL" ]; then
+        echo -e "${GREEN}CloudWatch Alarm Email: $ALARM_EMAIL${NC}"
+    else
+        echo -e "${YELLOW}CloudWatch alarms will be created but no email notifications will be sent${NC}"
+    fi
+else
+    echo -e "${GREEN}CloudWatch Alarm Email: $ALARM_EMAIL (from command line)${NC}"
 fi
 
 # WordPress Admin Password
@@ -298,6 +317,10 @@ cat > "$PARAMS_FILE" << EOF
   {
     "ParameterKey": "BusinessHoursEnd",
     "ParameterValue": "${BUSINESS_END}"
+  },
+  {
+    "ParameterKey": "AlarmEmail",
+    "ParameterValue": "${ALARM_EMAIL}"
   }
 ]
 EOF
