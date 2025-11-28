@@ -301,7 +301,14 @@ Resources:
                 [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ] && break
                 sleep 10
               done
-              [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ] && ! grep -q "define.*WP_HOME" wp-config.php && echo "" >> wp-config.php && echo "define('WP_HOME', 'http://$L');" >> wp-config.php && echo "define('WP_SITEURL', 'http://$L');" >> wp-config.php
+              if [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ]; then
+                if ! grep -q "define.*WP_HOME" wp-config.php; then
+                  sed -i "/^\/\* That's all, stop editing/i\\define('WP_HOME', 'http://$L');\\ndefine('WP_SITEURL', 'http://$L');\\n" wp-config.php
+                else
+                  sed -i "s#define.*WP_HOME.*#define('WP_HOME', 'http://$L');#g" wp-config.php
+                  sed -i "s#define.*WP_SITEURL.*#define('WP_SITEURL', 'http://$L');#g" wp-config.php
+                fi
+              fi
               [ ! -f /usr/local/bin/wp ] && curl -sO https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
               sleep 10
               U="${WordPressAdminUser}"
