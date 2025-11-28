@@ -225,7 +225,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
       LaunchTemplateData:
-        ImageId: ami-06555f4e4691a8faf  # Amazon Linux 2 AMI (update with your region's AMI)
+        ImageId: ami-0979de60fed46582f  # Amazon Linux 2 AMI (update with your region's AMI)
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:
@@ -306,10 +306,19 @@ Resources:
               sleep 10
               U="${WordPressAdminUser}"
               E="${WordPressAdminEmail}"
-              sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$U" --admin_password="$PW" --admin_email="$E" --skip-email --allow-root || true
+              if [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ]; then
+                sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://$L" --title="WordPress Site" --admin_user="$U" --admin_password="$PW" --admin_email="$E" --skip-email --allow-root || true
+              else
+                sudo -u apache /usr/local/bin/wp core install --path=/var/www/html --url="http://localhost" --title="WordPress Site" --admin_user="$U" --admin_password="$PW" --admin_email="$E" --skip-email --allow-root || true
+              fi
+              if [ -n "$L" ] && [ "$L" != "None" ] && [ "$L" != "null" ]; then
+                sudo -u apache /usr/local/bin/wp option update home "http://$L" --path=/var/www/html --allow-root || true
+                sudo -u apache /usr/local/bin/wp option update siteurl "http://$L" --path=/var/www/html --allow-root || true
+              fi
               systemctl restart httpd && systemctl enable httpd
               echo "$S" > /var/www/html/stack.txt
               curl -f -o /var/www/html/hostname.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/hostname.php 2>/dev/null && chown apache:apache /var/www/html/hostname.php && chmod 755 /var/www/html/hostname.php || true
+              mkdir -p /var/www/html/wp-content/themes/twentytwentyfive/patterns && curl -f -o /var/www/html/wp-content/themes/twentytwentyfive/patterns/footer.php https://raw.githubusercontent.com/kkenny/sl-course-end-project-wordpress/refs/heads/main/resources/footer.php 2>/dev/null && chown apache:apache /var/www/html/wp-content/themes/twentytwentyfive/patterns/footer.php && chmod 755 /var/www/html/wp-content/themes/twentytwentyfive/patterns/footer.php || true
               chown -R apache:apache /var/www/html && chmod -R 755 /var/www/html && chmod 644 wp-config.php
 
   # RDS Database for WordPress
@@ -378,6 +387,12 @@ Resources:
       DesiredCapacity: !If [IsProduction, 3, 1]
       HealthCheckType: ELB
       HealthCheckGracePeriod: 300
+      MetricsCollection:
+        - Granularity: 1Minute
+          Metrics:
+            - GroupDesiredCapacity
+            - GroupInServiceInstances
+            - GroupTotalInstances
       Tags:
         - Key: Name
           Value: !Sub '${Environment}-WordPressInstance'
@@ -749,96 +764,58 @@ Resources:
         - !If [HasAlarmEmail, !Ref AlarmNotificationTopic, !Ref 'AWS::NoValue']
 
   # CloudWatch Dashboard
+  # Note: Using !Join because !GetAtt cannot be used directly in !Sub JSON strings
+  # Metric format with dimensions: [namespace, metricName, "DimensionName", "DimensionValue"] (4 items)
+  # This format is accepted by CloudWatch dashboards for metrics with dimensions
   WordPressDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
       DashboardName: !Sub '${Environment}-WordPress-Dashboard'
-      DashboardBody: !Sub |
-        {
-          "widgets": [
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/EC2", "CPUUtilization", { "stat": "Average", "label": "EC2 CPU" } ],
-                  [ ".", "NetworkIn", { "stat": "Sum", "label": "Network In" } ],
-                  [ ".", "NetworkOut", { "stat": "Sum", "label": "Network Out" } ]
-                ],
-                "period": 300,
-                "stat": "Average",
-                "region": "${AWS::Region}",
-                "title": "EC2 Metrics (Auto Scaling Group)",
-                "view": "timeSeries",
-                "stacked": false
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/RDS", "CPUUtilization", { "stat": "Average", "label": "RDS CPU" } ],
-                  [ ".", "DatabaseConnections", { "stat": "Average", "label": "Connections" } ],
-                  [ ".", "FreeStorageSpace", { "stat": "Average", "label": "Free Storage (MB)", "yAxis": "right" } ]
-                ],
-                "period": 300,
-                "stat": "Average",
-                "region": "${AWS::Region}",
-                "title": "RDS Database Metrics",
-                "view": "timeSeries",
-                "stacked": false
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/ApplicationELB", "RequestCount", { "stat": "Sum", "label": "Requests" } ],
-                  [ ".", "TargetResponseTime", { "stat": "Average", "label": "Response Time (s)", "yAxis": "right" } ],
-                  [ ".", "HTTPCode_Target_2XX_Count", { "stat": "Sum", "label": "2xx" } ],
-                  [ ".", "HTTPCode_Target_4XX_Count", { "stat": "Sum", "label": "4xx" } ],
-                  [ ".", "HTTPCode_Target_5XX_Count", { "stat": "Sum", "label": "5xx" } ]
-                ],
-                "period": 300,
-                "stat": "Sum",
-                "region": "${AWS::Region}",
-                "title": "Load Balancer Metrics",
-                "view": "timeSeries",
-                "stacked": false
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/ApplicationELB", "HealthyHostCount", { "stat": "Average", "label": "Healthy" } ],
-                  [ ".", "UnHealthyHostCount", { "stat": "Average", "label": "Unhealthy" } ]
-                ],
-                "period": 300,
-                "stat": "Average",
-                "region": "${AWS::Region}",
-                "title": "Target Health",
-                "view": "timeSeries",
-                "stacked": false
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "metrics": [
-                  [ "AWS/AutoScaling", "GroupDesiredCapacity", { "stat": "Average", "label": "Desired" } ],
-                  [ ".", "GroupInServiceInstances", { "stat": "Average", "label": "In Service" } ],
-                  [ ".", "GroupTotalInstances", { "stat": "Average", "label": "Total" } ]
-                ],
-                "period": 300,
-                "stat": "Average",
-                "region": "${AWS::Region}",
-                "title": "Auto Scaling Group Capacity",
-                "view": "timeSeries",
-                "stacked": false
-              }
-            }
-          ]
-        }
+      DashboardBody: !Join
+        - ''
+        - - '{"widgets":[{"type":"metric","properties":{"metrics":[["AWS/EC2","CPUUtilization","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"],["AWS/EC2","NetworkIn","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"],["AWS/EC2","NetworkOut","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"]],"period":300,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"EC2 Metrics (Auto Scaling Group)","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/RDS","CPUUtilization","DBInstanceIdentifier","'
+          - !Ref WordPressDatabase
+          - '"],["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","'
+          - !Ref WordPressDatabase
+          - '"],["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","'
+          - !Ref WordPressDatabase
+          - '"]],"period":300,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"RDS Database Metrics","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"],["AWS/ApplicationELB","HTTPCode_Target_2XX_Count","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"]],"period":300,"stat":"Sum","region":"'
+          - !Ref AWS::Region
+          - '","title":"Load Balancer Metrics","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/ApplicationELB","HealthyHostCount","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"],["AWS/ApplicationELB","UnHealthyHostCount","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '"]],"period":300,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"Target Health","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/AutoScaling","GroupDesiredCapacity","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"],["AWS/AutoScaling","GroupInServiceInstances","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"],["AWS/AutoScaling","GroupTotalInstances","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"]],"period":300,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"Auto Scaling Group Capacity","view":"timeSeries","stacked":false}}]}'
 
 Outputs:
   VPCId:
