@@ -6,7 +6,7 @@
 # SimpliLearn Course End Project: Set Up and Monitor a WordPress Instance
 
 ## Objectives
-To set up and monitoring a WordPress instance for your organization is to establish a reliable and secure online presence that supports your business or organizational goals.
+To set up and monitor a WordPress instance for your organization is to establish a reliable and secure online presence that supports your business or organizational goals.
 
 ## Relevance
 In this project, several skills and tools are utilized, each serving a specific purpose within the industry:
@@ -15,31 +15,27 @@ AWS console – The AWS Management Console is a web application that includes an
 - EC2 Instance - Amazon EC2 provides a large set of instance types that are customized to certain use cases.
 
 ## Problem Statement
-You are given a project. You should be able to configure a WordPress instance using AWS CloudFormation and monitor the instance
+You are given a project to be able to configure a WordPress instance using AWS CloudFormation and monitor the instance
 
 ### Real-World Scenario
 Your organization publishes blogs and provides documentation services for other businesses and technologies. You have been asked to:
-- Set up a **live production WordPress instance** to publish blogs (runs 24/7)
-- Set up a **separate development WordPress instance** for development and testing purposes so that any work done on this instance will not impact the live blog
-- Configure the **development WordPress instance** to be available only during business hours (9 AM–6 PM) with automatic shutdown outside these hours
+- Set up a **live WordPress instance** to publish blogs
+- Set up a WordPress instance that can be used for **development and testing purposes** so that any work done on this instance will not impact the live blog
+- Configure the WordPress instance for development and testing purposes, which will be available only **during the business hours** (9AM–6 PM)
 
-## Tasks
+## Acceptance Criteria
 1. Create a CloudFormation stack
 2. Create an AMI of the WordPress instance
 3. Configure Auto Scaling to launch a new WordPress instance
 4. Configure the new WordPress instance to shut down automatically
 
 ## Solution Implementation
-
-This repository contains a complete solution for deploying and managing **two separate WordPress environments** on AWS:
-
+This repository contains a complete solution for deploying and managing **two separate WordPress environments** on AWS.
 1. **Production Environment** - Runs 24/7 for live blog publishing
 2. **Development Environment** - Auto-shuts down outside business hours for cost optimization
 
-### Key Features:
-
+## Key Features:
 ### Components
-
 1. **CloudFormation Template** (`wordpress-stack.yaml`)
    - Complete infrastructure setup including VPC, subnets, security groups
    - EC2 instances with WordPress installation
@@ -105,7 +101,6 @@ This repository contains a complete solution for deploying and managing **two se
 5. **Basic knowledge** of AWS services (EC2, CloudFormation, Auto Scaling)
 
 ## Quick Start Guide
-
 For detailed step-by-step deployment instructions, please refer to [QUICK_START.md](QUICK_START.md).
 
 The Quick Start Guide includes:
@@ -114,10 +109,8 @@ The Quick Start Guide includes:
 - AMI creation and Launch Template updates
 - Verification steps
 - Troubleshooting tips
-- Cost estimates
 
 ## Task Completion
-
 ### ✅ Task 1: Create a CloudFormation Stack
 **Completed** - The `wordpress-stack.yaml` template creates a complete stack with:
 - VPC with public subnets
@@ -164,34 +157,6 @@ The Quick Start Guide includes:
 - Development: Business hours configurable via CloudFormation parameters (default: 09:00-18:00 UTC)
 
 ## Architecture Overview
-
-### Production Environment (24/7)
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Internet Gateway                      │
-└────────────────────┬────────────────────────────────────┘
-                     │
-┌────────────────────▼────────────────────────────────────┐
-│        Production Application Load Balancer              │
-└────────────────────┬────────────────────────────────────┘
-                     │
-         ┌───────────┴───────────┐
-         │                       │
-┌────────▼────────┐    ┌─────────▼─────────┐
-│  Auto Scaling   │    │  Auto Scaling     │
-│  Group Instance │    │  Group Instance   │
-│  (WordPress)    │    │  (WordPress)      │
-│  Production     │    │  Production       │
-└────────┬────────┘    └─────────┬─────────┘
-         │                       │
-         └───────────┬───────────┘
-                     │
-         ┌───────────▼───────────┐
-         │   RDS MySQL Database  │
-         │      (Production)      │
-         └───────────────────────┘
-```
-
 ### Development Environment (Auto-Shutdown)
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -226,14 +191,39 @@ The Quick Start Guide includes:
 └─────────────────────────────────────────────────────────┘
 ```
 
+### Production Environment (24/7)
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Internet Gateway                      │
+└────────────────────┬────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────┐
+│        Production Application Load Balancer              │
+└────────────────────┬────────────────────────────────────┘
+                     │
+         ┌───────────┴───────────┐
+         │                       │
+┌────────▼────────┐    ┌─────────▼─────────┐
+│  Auto Scaling   │    │  Auto Scaling     │
+│  Group Instance │    │  Group Instance   │
+│  (WordPress)    │    │  (WordPress)      │
+│  Production     │    │  Production       │
+└────────┬────────┘    └─────────┬─────────┘
+         │                       │
+         └───────────┬───────────┘
+                     │
+         ┌───────────▼───────────┐
+         │   RDS MySQL Database  │
+         │      (Production)      │
+         └───────────────────────┘
+```
+
 **Key Differences:**
-- **Production:** Always running, no Lambda/EventBridge
-- **Development:** Lambda function monitors and shuts down instances outside business hours
+- **Production:** Always running, no Lambda/EventBridge, Availability groups target 3 instances, max of 8
+- **Development:** Lambda function monitors and shuts down instances outside business hours, Availability groups target 1 instance, max of 3
 
 ## Configuration Details
-
 ### Environment Configuration
-
 **Production Environment:**
 - Runs 24/7 with no auto-shutdown
 - Suitable for live blog publishing
@@ -248,14 +238,12 @@ The Quick Start Guide includes:
 - Cost-optimized for development/testing workloads
 
 ### Auto Scaling Configuration
-
 - **Minimum Size:** 1 instance
 - **Maximum Size:** 3 instances
 - **Desired Capacity:** 1 instance
 - **Health Check:** ELB health checks every 30 seconds
 
 ### Security
-
 - Security groups configured for:
   - HTTP (port 80) - public access
   - HTTPS (port 443) - public access
@@ -264,9 +252,7 @@ The Quick Start Guide includes:
 - IAM roles with least privilege access
 
 ## Monitoring and Management
-
 ### View Stack Outputs
-
 ```bash
 aws cloudformation describe-stacks \
   --stack-name wordpress-stack \
@@ -275,20 +261,17 @@ aws cloudformation describe-stacks \
 ```
 
 ### Check Auto Scaling Group Status
-
 ```bash
 aws autoscaling describe-auto-scaling-groups \
   --auto-scaling-group-names WordPressAutoScalingGroup
 ```
 
 ### View Lambda Function Logs
-
 ```bash
 aws logs tail /aws/lambda/WordPressAutoShutdown --follow
 ```
 
 ### Manual Instance Management
-
 Start an instance:
 ```bash
 aws ec2 start-instances --instance-ids <instance-id>
@@ -300,9 +283,7 @@ aws ec2 stop-instances --instance-ids <instance-id>
 ```
 
 ## Troubleshooting
-
 ### Stack Creation Fails
-
 1. Check CloudFormation events in AWS Console
 2. Verify IAM permissions (requires EC2, RDS, Lambda, Auto Scaling permissions)
    - **Common issue:** "You are not authorized to use launch template" error
@@ -328,29 +309,24 @@ aws ec2 stop-instances --instance-ids <instance-id>
 4. Check if default VPC limits are not exceeded
 
 ### WordPress Not Accessible
-
 1. Wait 5-10 minutes after stack creation for WordPress installation
 2. Check security group rules
 3. Verify instance is running
 4. Check Load Balancer health checks
 
 ### AMI Creation Fails
-
 1. Ensure at least one instance is running in the Auto Scaling Group
 2. Check instance state (should be "running")
 3. Verify IAM permissions for EC2
 
 ### Auto Shutdown Not Working
-
 1. Check Lambda function logs
 2. Verify EventBridge rule is enabled
 3. Check Lambda execution role permissions
 4. Verify business hours are set correctly (UTC timezone)
 
 ## Cleanup
-
 To delete all resources and avoid charges:
-
 ```bash
 aws cloudformation delete-stack --stack-name wordpress-stack
 ```
@@ -358,14 +334,12 @@ aws cloudformation delete-stack --stack-name wordpress-stack
 **Note:** This will delete all resources including the database. Ensure you have backups if needed.
 
 ## Cost Optimization
-
 - RDS instance uses `db.t3.micro` (eligible for free tier)
 - EC2 instances can use `t3.micro` for testing (free tier eligible)
 - Auto-shutdown feature reduces costs by stopping instances outside business hours
 - Consider using Reserved Instances for production workloads
 
 ## Additional Notes
-
 - All times are in UTC - adjust business hours accordingly
 - The AMI ID in the template may need to be updated for your specific region
 - For production use, consider:
@@ -376,11 +350,9 @@ aws cloudformation delete-stack --stack-name wordpress-stack
   - Using Multi-AZ RDS for high availability
 
 ## Testing
-
 This repository includes a test suite using [bats-core](https://github.com/bats-core/bats-core) for unit testing bash scripts.
 
 ### Quick Start
-
 1. **Install testing dependencies:**
    ```bash
    ./setup-bats.sh
@@ -392,7 +364,6 @@ This repository includes a test suite using [bats-core](https://github.com/bats-
    ```
 
 ### Test Coverage
-
 The test suite covers:
 - Core functions in `_common.sh` (password generation, AWS operations, validation)
 - Script argument parsing for all deployment and utility scripts
@@ -402,7 +373,6 @@ The test suite covers:
 For detailed testing documentation, see [TESTING.md](TESTING.md).
 
 ## Support
-
 For issues or questions:
 1. Check AWS CloudFormation console for stack events
 2. Review CloudWatch logs for Lambda function
