@@ -225,7 +225,7 @@ Resources:
     Properties:
       LaunchTemplateName: !Sub '${Environment}-WordPressLaunchTemplate'
       LaunchTemplateData:
-        ImageId: ami-0979de60fed46582f  # Amazon Linux 2 AMI (update with your region's AMI)
+        ImageId: ami-089d13543cce52d29  # Amazon Linux 2 AMI (update with your region's AMI)
         InstanceType: !Ref InstanceType
         KeyName: !Ref KeyPairName
         IamInstanceProfile:
@@ -774,47 +774,73 @@ Resources:
   # Note: Using !Join because !GetAtt cannot be used directly in !Sub JSON strings
   # Metric format with dimensions: [namespace, metricName, "DimensionName", "DimensionValue"] (4 items)
   # This format is accepted by CloudWatch dashboards for metrics with dimensions
+  #WordPressDashboard:
+  #  Type: AWS::CloudWatch::Dashboard
+  #  Properties:
+  #    DashboardName: !Sub '${Environment}-WordPress-Dashboard'
+  #    DashboardBody: !Join
+  #      - ''
+  #      - - '{"widgets":[{"type":"metric","properties":{"metrics":[["AWS/EC2","CPUUtilization","AutoScalingGroupName","'
+  #        - !Sub '${Environment}-WordPressAutoScalingGroup'
+  #        - '"],["AWS/EC2","NetworkIn","AutoScalingGroupName","'
+  #        - !Sub '${Environment}-WordPressAutoScalingGroup'
+  #        - '"],["AWS/EC2","NetworkOut","AutoScalingGroupName","'
+  #        - !Sub '${Environment}-WordPressAutoScalingGroup'
+  #        - '"]],"period":300,"stat":"Average","region":"'
+  #        - !Ref AWS::Region
+  #        - '","title":"EC2 Metrics (Auto Scaling Group)","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/RDS","CPUUtilization","DBInstanceIdentifier","'
+  #        - !Ref WordPressDatabase
+  #        - '"],["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","'
+  #        - !Ref WordPressDatabase
+  #        - '"],["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","'
+  #        - !Ref WordPressDatabase
+  #        - '"]],"period":300,"stat":"Average","region":"'
+  #        - !Ref AWS::Region
+  #        - '","title":"RDS Database Metrics","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"],["AWS/ApplicationELB","HTTPCode_Target_2XX_Count","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"]],"period":300,"stat":"Sum","region":"'
+  #        - !Ref AWS::Region
+  #        - '","title":"Load Balancer Metrics","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/ApplicationELB","HealthyHostCount","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"],["AWS/ApplicationELB","UnHealthyHostCount","LoadBalancer","'
+  #        - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+  #        - '"]],"period":300,"stat":"Average","region":"'
+  #        - !Ref AWS::Region
+  #        - '","title":"Target Health","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/AutoScaling","GroupDesiredCapacity","AutoScalingGroupName","'
+  #        - !Sub '${Environment}-WordPressAutoScalingGroup'
+  #        - '"],["AWS/AutoScaling","GroupInServiceInstances","AutoScalingGroupName","'
+  #        - !Sub '${Environment}-WordPressAutoScalingGroup'
+  #        - '"],["AWS/AutoScaling","GroupTotalInstances","AutoScalingGroupName","'
+  #        - !Sub '${Environment}-WordPressAutoScalingGroup'
+  #        - '"]],"period":300,"stat":"Average","region":"'
+  #        - !Ref AWS::Region
+  #        - '","title":"Auto Scaling Group Capacity","view":"timeSeries","stacked":false}}]}'
+
   WordPressDashboard:
     Type: AWS::CloudWatch::Dashboard
     Properties:
       DashboardName: !Sub '${Environment}-WordPress-Dashboard'
       DashboardBody: !Join
         - ''
-        - - '{"widgets":[{"type":"metric","properties":{"metrics":[["AWS/EC2","CPUUtilization","AutoScalingGroupName","'
-          - !Sub '${Environment}-WordPressAutoScalingGroup'
-          - '"],["AWS/EC2","NetworkIn","AutoScalingGroupName","'
-          - !Sub '${Environment}-WordPressAutoScalingGroup'
-          - '"],["AWS/EC2","NetworkOut","AutoScalingGroupName","'
-          - !Sub '${Environment}-WordPressAutoScalingGroup'
-          - '"]],"period":300,"stat":"Average","region":"'
+        - - '{"widgets":['
+          - '{"type":"metric","x":0,"y":0,"width":6,"height":6,"properties":{"view":"timeSeries","stacked":true,"metrics":[["AWS/ApplicationELB","HealthyHostCount","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '",{"region":"'
           - !Ref AWS::Region
-          - '","title":"EC2 Metrics (Auto Scaling Group)","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/RDS","CPUUtilization","DBInstanceIdentifier","'
-          - !Ref WordPressDatabase
-          - '"],["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","'
-          - !Ref WordPressDatabase
-          - '"],["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","'
-          - !Ref WordPressDatabase
-          - '"]],"period":300,"stat":"Average","region":"'
+          - '"}],[".","UnHealthyHostCount",".",".",{"region":"'
           - !Ref AWS::Region
-          - '","title":"RDS Database Metrics","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"],["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"],["AWS/ApplicationELB","HTTPCode_Target_2XX_Count","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"],["AWS/ApplicationELB","HTTPCode_Target_4XX_Count","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"],["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"]],"period":300,"stat":"Sum","region":"'
+          - '"}]],"region":"'
           - !Ref AWS::Region
-          - '","title":"Load Balancer Metrics","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/ApplicationELB","HealthyHostCount","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"],["AWS/ApplicationELB","UnHealthyHostCount","LoadBalancer","'
-          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
-          - '"]],"period":300,"stat":"Average","region":"'
-          - !Ref AWS::Region
-          - '","title":"Target Health","view":"timeSeries","stacked":false}},{"type":"metric","properties":{"metrics":[["AWS/AutoScaling","GroupDesiredCapacity","AutoScalingGroupName","'
+          - '","period":300,"title":"Target Health"}},'
+          - '{"type":"metric","x":6,"y":0,"width":6,"height":6,"properties":{"metrics":[["AWS/AutoScaling","GroupDesiredCapacity","AutoScalingGroupName","'
           - !Sub '${Environment}-WordPressAutoScalingGroup'
           - '"],["AWS/AutoScaling","GroupInServiceInstances","AutoScalingGroupName","'
           - !Sub '${Environment}-WordPressAutoScalingGroup'
@@ -822,7 +848,77 @@ Resources:
           - !Sub '${Environment}-WordPressAutoScalingGroup'
           - '"]],"period":300,"stat":"Average","region":"'
           - !Ref AWS::Region
-          - '","title":"Auto Scaling Group Capacity","view":"timeSeries","stacked":false}}]}'
+          - '","title":"Auto Scaling Group Capacity","view":"timeSeries","stacked":false}},'
+          - '{"type":"metric","x":12,"y":0,"width":6,"height":6,"properties":{"metrics":[["AWS/EC2","CPUUtilization","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '",{"region":"'
+          - !Ref AWS::Region
+          - '","visible":false}],[".","NetworkIn",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '"}],[".","NetworkOut",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '","yAxis":"right"}]],"period":60,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"EC2 - Network","view":"timeSeries","stacked":true}},'
+          - '{"type":"metric","x":18,"y":0,"width":6,"height":6,"properties":{"metrics":[["AWS/EC2","CPUUtilization","AutoScalingGroupName","'
+          - !Sub '${Environment}-WordPressAutoScalingGroup'
+          - '"]],"period":60,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"EC2 - CPU Utilization","view":"timeSeries","stacked":false}},'
+          - '{"type":"metric","x":0,"y":6,"width":12,"height":7,"properties":{"metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '",{"region":"'
+          - !Ref AWS::Region
+          - '","visible":false}],[".","TargetResponseTime",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '","visible":false}],[".","HTTPCode_Target_2XX_Count",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '"}],[".","HTTPCode_Target_4XX_Count",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '"}],[".","HTTPCode_Target_5XX_Count",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '"}]],"period":3600,"stat":"Sum","region":"'
+          - !Ref AWS::Region
+          - '","title":"Load Balancer Metrics","view":"gauge","stacked":false,"yAxis":{"left":{"min":1,"max":250}},"liveData":true,"singleValueFullPrecision":false}},'
+          - '{"type":"metric","x":12,"y":6,"width":12,"height":7,"properties":{"metrics":[["AWS/ApplicationELB","RequestCount","LoadBalancer","'
+          - !GetAtt WordPressLoadBalancer.LoadBalancerFullName
+          - '",{"region":"'
+          - !Ref AWS::Region
+          - '"}],[".","TargetResponseTime",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '","yAxis":"right"}],[".","HTTPCode_Target_2XX_Count",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '","visible":false}],[".","HTTPCode_Target_4XX_Count",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '","visible":false}],[".","HTTPCode_Target_5XX_Count",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '","visible":false}]],"period":60,"stat":"Sum","region":"'
+          - !Ref AWS::Region
+          - '","title":"Load Balancer Metrics","view":"timeSeries","stacked":false}},'
+          - '{"type":"metric","x":0,"y":13,"width":5,"height":6,"properties":{"view":"timeSeries","stacked":true,"metrics":[["AWS/SNS","NumberOfMessagesPublished","TopicName","'
+          - !Sub '${Environment}-WordPressAlarms'
+          - '",{"region":"'
+          - !Ref AWS::Region
+          - '"}],[".","NumberOfNotificationsFailed",".",".",{"region":"'
+          - !Ref AWS::Region
+          - '"}]],"region":"'
+          - !Ref AWS::Region
+          - '","period":300,"title":"SNS Deliveries"}},'
+          - '{"type":"metric","x":5,"y":13,"width":6,"height":6,"properties":{"metrics":[["AWS/RDS","CPUUtilization","DBInstanceIdentifier","'
+          - !Ref WordPressDatabase
+          - '"],["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","'
+          - !Ref WordPressDatabase
+          - '"],["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","'
+          - !Ref WordPressDatabase
+          - '"]],"period":300,"stat":"Average","region":"'
+          - !Ref AWS::Region
+          - '","title":"RDS Database Metrics","view":"timeSeries","stacked":false}},'
+          - '{"type":"metric","x":11,"y":13,"width":6,"height":6,"properties":{"view":"timeSeries","stacked":true,"metrics":[["AWS/RDS","DatabaseConnections",{"period":60}]],"region":"'
+          - !Ref AWS::Region
+          - '","title":"RDS - DB Connections"}},'
+          - '{"type":"metric","x":17,"y":13,"width":7,"height":6,"properties":{"view":"timeSeries","stacked":true,"metrics":[["AWS/RDS","NetworkReceiveThroughput",{"period":60}],[".","NetworkTransmitThroughput",{"period":60}]],"region":"'
+          - !Ref AWS::Region
+          - '","title":"RDS - DB Network Thruput"}}]}'
 
 Outputs:
   VPCId:
